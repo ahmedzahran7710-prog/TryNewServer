@@ -4,8 +4,8 @@
 > آخر تحديث: **2026-11-14**
 > فرع جلسة الإنشاء: `arena/6df8e5dd-rappelz-server`
 > commit الأساس: `6e41fb84fa458e22c4ef1ae150a143979f6af24b`
-> فرع الجلسة الحالي: `arena/47c553cd-rappelz-server`
-> commit الأساس الحالي: `6454013315694136cd6fb5fb35132879b6e61d8d`
+> فرع الجلسة الحالي: `arena/e02d9f63-rappelz-server`
+> commit الأساس الحالي: `18be1bb39032b7fecbb3f3d45ea604ae536e77b2`
 
 ---
 
@@ -157,6 +157,46 @@ SQL Server Express
 2. **`NPCResource.contact_script`** ⇒ نضيف NPC خاصنا بدل اختطاف NPC موجود.
 3. دوال Lua مكتشفة: `get_value/set_value` · `add_npc` (استدعاء بوس) · `add_event_state` (باف حدث) · `insert_awaken` · `SCRIPT_BroadcastNotice`.
 4. أولويات مقترحة: هدية `on_login` → Auto Buffer NPC → Level-up Rewards → World Buffs.
+
+---
+
+## 3.6) خريطة الملفات على الجهاز الحي (من لقطات 2026-11-14 — الساعة 21:10)
+
+### المسارات المؤكدة باللقطات
+
+| المسار | المحتوى (كما في اللقطة) |
+|---|---|
+| `C:\RZ\Server\FilesOfficial-Revolution9.1\GameEngine\` | `Auth_bin\` · `DBUpdater\` · `Game_bin\` · `Log_bin\` · `Server_Launcher\` · `ReadMe!!.txt` |
+| `...\GameEngine\Game_bin\` | `CaptainHerlockServer.exe` (5.2MB) + **`CaptainHerlockServer.pdb`** (رموز debug متاحة!) · `GameServer.opt` + `gameserver.eop` · `RappelzCompress.exe` · `EOPUpdater.exe/.opt` · `GameLog.txt` · `Log\` · `Resource\` · `AntiCpXSvr.dll` · msvcr80/msvcp80/msvcm80 + manifest · `zlib1.dll` · **`Arcadia 2026-11-14 18-22-46.dmp` (2.7MB) + `.txt` (24KB)** = كرش دامب بتاريخ اليوم 18:22 |
+| `C:\RZ\rzauth\` | `rzauth.exe` · `rzu.dll` · `auth.opt` · `libcrypto-1_1-x64.dll` · `libssl-1_1-x64.dll` · `rzauth_user_guide.md` · `readme-ar.txt` · `rzauth-v6.5-win64.zip` · `log\` · اختصار |
+| `F:\AhmedZahran\Client\` (القرص اسمه **Mena**) | 70 ملفًا: `SFrame.exe` · `Revolution Launcher.bat` · `RappelzCmdLauncher.exe` · `RappelzConfig.exe` · `Launcher.exe` · `rappelz_v1.opt` · `data.000`–`data.008` + `data.00A–00F` · `GameGuard\` · `Guild_Icon\` · `Resource\` · `quickslot.ini` · `customcamera.ini` · `rappelz.log` |
+| حساب SQL | login **`rappelz` بدون باسورد** — مؤكد من صاحب المشروع (2026-11-14): «لسه هنشتغل عليها بعدين» |
+
+> ⚠️ تعارض مسارات: الأدلة القديمة تذكر العميل في `F:\AhmedZahran\rappelz server\Client\New folder\` — اللقطة تُظهر `F:\AhmedZahran\Client\`. تحقق عند أي مهمة عميل أيهما الحالي (نقل أم نسخة).
+
+### الحالة الحية المؤكدة من اللقطات (2026-11-14 ~21:10)
+
+- **LogServer:** `Log Server v1.0` — IOCP + Acceptor = ok.
+- **Service Launcher:** `Network initialize... ok`.
+- **rzauth v6.5** (build 2023-10-02): اتصال القاعدة `Connection ok` · المنافذ مؤكدة: `auth.clients 0.0.0.0:1996` · `auth.gameserver 0.0.0.0:4502` · `auth.billing 127.0.0.1:4503` · `admin.console 127.0.0.1:4501` · `upload.clients 0.0.0.0:4617` · `upload.gameserver 127.0.0.1:4616` · `upload.iconserver 0.0.0.0:5000` · `logclient 127.0.0.1:4516` · **`trafficdump.enable:false` ✅**.
+- **علامة نجاح:** `Server Login: Revolution Official[1] at 25.21.212.130:4514` (السيرفر سجّل نفسه على هاماتشي) + `Server Login: Game001 from 127.0.0.1`.
+- **كونسول Game001:** تحميل الموارد كاملًا · `Connect To Auth... ok` · `Connect To Upload... ok` · `Acceptor initialize... ok (0.0.0.0:4514)` · أخطاء `Lua run string failed. mob(...)` = **معروفة وليست أعطال** · `Event state added successfully` ×3.
+- **RZ-GM Tool v1.6:** متصل `127.0.0.1 / Telecaster1 / rappelz` (باسورد فارغ) — محمّل شخصيتين:
+
+  | sid | الاسم | lv | gold | permission |
+  |---|---|---|---|---|
+  | 444214 | Zahran | **300** | 7,520,140,316 | 100 |
+  | 444215 | OwnerZahran | 182 | 2,315,981 | 100 |
+
+  - خانة `I have a backup (required before any write)` مُفعّلة ✅ · `permission = 100 for Zahran` · `end buffs of Zahran (0)`.
+- **هاماتشي:** الشبكة الحالية اسمها **`Test-conquer`** (ليست `ahmed-rappelz` كما في الأدلة القديمة) · IP `25.21.212.130` · المضيف `DESKTOP-ICC037B` · 4/5: `PC07` · `PC10` · `PC10` (واحدة رمادية = غير متصل).
+
+### ملاحظات جديدة تستحق متابعة (ليست قرارات)
+
+1. `Arcadia 2026-11-14 18-22-46.dmp/.txt` — كرش دامب اليوم 18:22؛ افتح `.txt` عند الحاجة لمعرفة السبب.
+2. وجود `CaptainHerlockServer.pdb` = إمكان تحليل الكرشات برموز debug.
+3. Zahran وصلت **lv 300** (فوق السقفين 180/200 الموثقين) — تغيير عبر الأداة؛ تأكد إن كان مقصودًا.
+4. مسار العميل الحالي `F:\AhmedZahran\Client` يختلف عن الموثق سابقًا — حدّث أي مهمة عميل.
 
 ---
 
@@ -461,6 +501,19 @@ set_env("game.gold_drop_rate","200")
 ---
 
 ## 11) سجل المحادثات
+
+### 2026-11-14 — لقطات الجهاز الحي وحفظ المسارات (`arena/e02d9f63`)
+
+- المطلوب: مراجعة 10 لقطات شاشة من جهاز صاحب المشروع وفهمها وحفظ أماكن الملفات ومحتواها في الذاكرة.
+- ما تم تنفيذه:
+  - فهم اللقطات: LogServer · Service Launcher · rzauth console · كونسول Game001 · RZ-GM Tool v1.6 · Hamachi · مجلدات `GameEngine` و`Game_bin` و`rzauth` و`Client`.
+  - تأكيد حي: السلسلة تعمل كاملة + المنافذ + `trafficdump:false` + تسجيل Game001 على هاماتشي.
+  - حفظ خريطة المسارات والمحتوى في قسم جديد **§3.6**.
+  - تأكيد من صاحب المشروع: حساب SQL اسمه `rappelz` بدون باسورد حاليًا (سيُضبط لاحقًا).
+- مكتشفات: كرش `Arcadia ...18-22-46.dmp` اليوم · رموز debug `.pdb` متاحة · Zahran lv 300 · شبكة هاماتشي اسمها `Test-conquer` · مسار عميل جديد `F:\AhmedZahran\Client`.
+- ملفات تغيّرت: `MEMORY.md`.
+- عوائق/أسئلة: أي مسار العميل هو الصحيح؟ هل lv 300 مقصود؟ سبب كرش Arcadia 18:22؟ (أسئلة مفتوحة — لا تعديل أي شيء.)
+- حالة الدمج إلى main: (يُسجَّل بعد الدمج).
 
 ### 2026-11-14 — جلسة قراءة شاملة + مراجعة مصادر التطوير (`arena/47c553cd`)
 
