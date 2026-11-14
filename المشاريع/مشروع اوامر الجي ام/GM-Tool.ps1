@@ -1,10 +1,14 @@
 <#
-  RZ-GM Tool v1.0  --  Windows GUI for Rappelz 9.1
+  RZ-GM Tool v1.7  --  Windows GUI for Rappelz 9.1
   ASCII ONLY. Do not add non-ASCII characters to this file.
 
+  PRIMARY GM tool (the in-game auction board was removed).
   Talks to SQL Server directly (no console password needed).
   Changes are stored in the database and take effect when the
   character logs in (or relogs).
+
+  Connection: Server=127.0.0.1  DB=Telecaster1
+              User=rappelz  Pass=(empty)  -> Connect
 
   Run:  powershell -ExecutionPolicy Bypass -File .\GM-Tool.ps1
 #>
@@ -65,10 +69,11 @@ function Connect-Db {
     $lblStatus.Text = "Not connected"
     $lblStatus.ForeColor = [System.Drawing.Color]::Red
     Log "CONNECT FAILED."
-    Log "The server name comes from your own config: GameServer.opt says db.c.server:127.0.0.1"
-    Log "and authserver.opt says db.auth.server:127.0.0.1 with account 'sa'."
-    Log "1) Server = 127.0.0.1   2) User = sa   3) Pass = your sa password"
-    Log "4) If you never set an sa password, tick nothing and press Connect again (Windows login is tried too)."
+    Log "Working combo on THIS server:"
+    Log "  Server = 127.0.0.1   DB = Telecaster1"
+    Log "  User   = rappelz     Pass = (leave empty)"
+    Log "Then press Connect again. Windows login is tried as fallback."
+    Log "If SQL Server service is stopped, start it first (services.msc)."
 }
 
 function Load-Characters {
@@ -328,6 +333,44 @@ function Do-ClearBuffs {
     if ($ok) { Log "buffs cleared for $($script:SelectedName)"; Show-StateList }
 }
 
+function Do-BlessAll {
+    if (-not (Require-Backup)) { return }
+    $sid = Get-Sid; if ($sid -eq $null) { return }
+    $codes = @(
+        @(1007,150), @(1008,150), @(1009,250), @(1010,450),
+        @(1011,90),  @(1012,50),  @(1013,150), @(1014,100),
+        @(1015,150), @(4102,50),  @(1513,60),  @(1507,50)
+    )
+    $min = 720
+    if (-not [int]::TryParse($txtBuffMin.Text, [ref]$min)) { $min = 720 }
+    if ($min -lt 1 -or $min -gt 720) { $min = 720 }
+    $dur = [int]($min * 60000)
+    $ans = [System.Windows.Forms.MessageBox]::Show(
+        ("Apply ALL 12 bless buffs (" + $min + " min) to " + $script:SelectedName + "?"),
+        "Confirm bless", [System.Windows.Forms.MessageBoxButtons]::YesNo)
+    if ($ans -ne 'Yes') { Log "cancelled"; return }
+    $okAll = $true
+    foreach ($pair in $codes) {
+        $c = $pair[0]; $p = $pair[1]
+        $sql = "DELETE FROM dbo.[State] WHERE owner_id=@cid AND code=@c; " +
+               "DECLARE @nsid INT; SELECT @nsid = ISNULL(MAX(sid),0) + 1 FROM dbo.[State]; " +
+               "EXEC dbo.smp_insert_state @IN_SID=@nsid, @IN_OWNER_ID=@cid, @IN_SUMMON_ID=0, " +
+               "@IN_CODE=@c, @IN_LEVEL=@p, @IN_DURATION=@dur, @IN_REMAIN_TIME=@dur, " +
+               "@IN_BASE_DAMAGE=0, @IN_REMAIN_FIRE_TIME=0, @IN_STATE_VALUE=0, " +
+               "@IN_STATE_STRING_VALUE=N'', @IN_ENABLE=1"
+        if (-not (Exec $sql @{ '@cid' = $sid; '@c' = $c; '@p' = $p; '@dur' = $dur })) {
+            $okAll = $false
+        }
+    }
+    if ($okAll) {
+        Log ("BLESSED: 12 buffs, " + $min + " min -> " + $script:SelectedName)
+        Log "Player must relog (log out and in) to see them."
+        Show-StateList
+    } else {
+        Log "Bless finished WITH ERRORS - check log lines above."
+    }
+}
+
 function Do-FindStates {
     if ($script:Conn -eq $null) { Log "Not connected."; return }
     Log-Rows "SELECT t.name AS tbl, c.name AS col, ty.name AS typ FROM Arcadia.sys.tables t JOIN Arcadia.sys.columns c ON c.object_id = t.object_id JOIN Arcadia.sys.types ty ON ty.user_type_id = c.user_type_id WHERE t.name LIKE '%State%' ORDER BY t.name, c.column_id" "Arcadia state tables + columns" 120
@@ -356,7 +399,7 @@ function Do-SetLevel {
     if (-not (Require-Backup)) { return }
     $sid = Get-Sid; if ($sid -eq $null) { return }
     $v = 0; if (-not [int]::TryParse($txtLevel.Text, [ref]$v)) { Log "Level must be a number."; return }
-    if ($v -lt 1 -or $v -gt 200) { Log "Level must be 1..200."; return }
+    if ($v -lt 1 -or $v -gt 400) { Log "Level must be 1..400."; return }
     $ok = Exec "UPDATE dbo.Character SET lv=@l, max_reached_level=CASE WHEN max_reached_level<@l THEN @l ELSE max_reached_level END WHERE sid=@sid" @{ '@l' = $v; '@sid' = $sid }
     if ($ok) { Log "level = $v for $($script:SelectedName). Note: exp is not adjusted."; Load-Characters }
 }
@@ -419,8 +462,8 @@ function Do-BlockAccount {
 
 # ---------------------------------------------------------------- form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "RZ-GM Tool v1.6  -  Rappelz 9.1"
-$form.Size = New-Object System.Drawing.Size(980, 700)
+$form.Text = "RZ-GM Tool v1.7  -  Rappelz 9.1"
+$form.Size = New-Object System.Drawing.Size(980, 740)
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 
@@ -820,8 +863,71 @@ $btnFindStates.Size = New-Object System.Drawing.Size(200, 28)
 $btnFindStates.Add_Click({ Do-FindStates })
 $form.Controls.Add($btnFindStates)
 
-Log "RZ-GM Tool v1.6 ready."
-Log "1) Press Connect   2) Search a name   3) Tick the backup box   4) Use the buttons"
-Log "Changes apply when the character logs in. Use the in-game board for live self-grants."
+# --- buff presets (fills code + level + minutes; ASCII labels only)
+$lblPre = New-Object System.Windows.Forms.Label
+$lblPre.Text = "Preset"
+$lblPre.Location = New-Object System.Drawing.Point(10, 625)
+$lblPre.Size = New-Object System.Drawing.Size(50, 20)
+$form.Controls.Add($lblPre)
+
+$cmbPreset = New-Object System.Windows.Forms.ComboBox
+$cmbPreset.Location = New-Object System.Drawing.Point(62, 622)
+$cmbPreset.Size = New-Object System.Drawing.Size(330, 24)
+$cmbPreset.DropDownStyle = 'DropDownList'
+$buffPresets = @(
+    "ATK +150 (30m) [1007]",
+    "M.Atk +150 (30m) [1008]",
+    "DEF +250 (30m) [1009]",
+    "M.Def +450 (30m) [1010]",
+    "Atk Spd +90 (30m) [1011]",
+    "Cast Spd +50 (30m) [1012]",
+    "Move Spd +150 (30m) [1013]",
+    "Accuracy +100 (30m) [1014]",
+    "Evasion +150 (30m) [1015]",
+    "Exp x2 +50 (2.5h) [4102]",
+    "Max HP +60 (30m) [1513]",
+    "Luck +50 (30m) [1507]",
+    "ALL self bless (~23 days)"
+)
+foreach ($p in $buffPresets) { [void]$cmbPreset.Items.Add($p) }
+$cmbPreset.Add_SelectedIndexChanged({
+    $i = $cmbPreset.SelectedIndex
+    if ($i -lt 0) { return }
+    if ($i -eq 12) {
+        # permanent blessing: send every preset code with max minutes
+        $txtBuffCode.Text = "1007,1008,1009,1010,1011,1012,1013,1014,1015,4102,1513,1507"
+        $txtBuffLevel.Text = "5"
+        $txtBuffMin.Text = "720"
+        Log "Preset = ALL bless: press [Send buff] once per code, or use Clear+loop."
+        Log "Tip: for a single quick buff pick one line above instead."
+        return
+    }
+    $map = @(
+        @(1007,150,30), @(1008,150,30), @(1009,250,30), @(1010,450,30),
+        @(1011,90,30),  @(1012,50,30),  @(1013,150,30), @(1014,100,30),
+        @(1015,150,30), @(4102,50,150), @(1513,60,30),  @(1507,50,30)
+    )
+    $txtBuffCode.Text  = [string]$map[$i][0]
+    $txtBuffLevel.Text = [string]$map[$i][1]
+    $txtBuffMin.Text   = [string]$map[$i][2]
+})
+$form.Controls.Add($cmbPreset)
+
+$btnBless = New-Object System.Windows.Forms.Button
+$btnBless.Text = "Bless ALL (12 buffs, 720m) on selected"
+$btnBless.Location = New-Object System.Drawing.Point(402, 620)
+$btnBless.Size = New-Object System.Drawing.Size(280, 28)
+$btnBless.Add_Click({ Do-BlessAll })
+$form.Controls.Add($btnBless)
+
+Log "RZ-GM Tool v1.7 ready."
+Log "1) Connect   2) Search a name   3) Tick the backup box   4) Use the buttons"
+Log "The in-game auction board was removed. THIS tool is the GM control now."
+
+# auto-connect with the known-good combo (falls back silently)
+if ($txtServer.Text -eq "") { $txtServer.Text = "127.0.0.1" }
+if ($txtDb.Text -eq "")     { $txtDb.Text = "Telecaster1" }
+if ($txtUser.Text -eq "")   { $txtUser.Text = "rappelz" }
+try { Connect-Db } catch { Log "auto-connect skipped: $($_.Exception.Message)" }
 
 [void]$form.ShowDialog()
