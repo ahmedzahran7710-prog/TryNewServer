@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  START-GM-TOOL.cmd  --  launcher for GM-Tool v1.7 GUI
+REM  START-GM-TOOL.cmd  --  launcher for GM-Tool v2.0 GUI
 REM  Checks files, ensures SQL Server runs, opens the GUI.
 REM  ASCII only / CRLF
 REM ============================================================
@@ -10,7 +10,7 @@ title RZ-GM Tool Launcher
 
 echo.
 echo ==============================================
-echo   RZ-GM Tool launcher
+echo   RZ-GM Tool v2.0 launcher
 echo ==============================================
 
 REM ---- 1) PowerShell present? --------------------------------
@@ -31,6 +31,14 @@ if not exist "%~dp0GM-Tool.ps1" (
   echo this launcher again.
   pause
   exit /b 1
+)
+
+REM ---- 2b) Arabic data files present? --------------------
+if not exist "%~dp0GM-UI-ar.txt" (
+  echo WARN: GM-UI-ar.txt missing - UI labels fall back to English.
+)
+if not exist "%~dp0GM-Buffs-ar.csv" (
+  echo WARN: GM-Buffs-ar.csv missing - buff list will be empty.
 )
 echo [OK] GM-Tool.ps1 found
 

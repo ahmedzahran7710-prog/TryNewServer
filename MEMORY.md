@@ -619,6 +619,15 @@ set_env("game.gold_drop_rate","200")
 
 ---
 
+## 2026-11-14 (later) — GM-Tool v2.0: full tabbed Arabic GUI redesign
+- **Owner rejected v1.7 layout** ("القايمة لسه شكلها ملخبط جدا") — v1.7 only patched functions, did not reorganize the visual layout. v2.0 rebuilds the form as a **TabControl with 4 tabs**: اللاعب / البفات / جماعي للسيرفر / أدوات.
+- **Architecture split (keeps PowerShell ASCII-only):** `GM-Tool.ps1` = code only (48663 B, ASCII, balance 0); Arabic strings live in **`GM-UI-ar.txt`** (UTF-8 key=value) and buff catalog in **`GM-Buffs-ar.csv`** (UTF-8: code,power,minutes,name_ar — 12 entries from جدول-البفات). Loaded at runtime via `[IO.File]::ReadAllLines(..., UTF8)`.
+- **Buffs tab:** target dropdown filled from character grid (name + sid, syncs both ways), duration dropdown (10m/1h/2.5h/12h), ListView with Arabic name + power + code + minutes; Send / Clear / Bless-ALL(12) buttons. New `Do-SendBuffTab` replaces old `Do-SendBuff` (deleted — referenced removed `txtBuffCode/Level/Min` controls).
+- **Server-wide tab:** (a) rate buttons EXP/DROP/GOLD **copy chat commands** to clipboard (`/run set_env("game.exp_rate","300")` etc. — owner confirmed chat `/run`+`add_state` works in-game with permission=100); (b) **`Do-GroupState`** = single SQL INSERT applying one selected buff to EVERY non-deleted character (`ROW_NUMBER()` over `dbo.[Character]`), with confirm dialog; hint also shows `/run cast_world_state(...)`.
+- **Launcher** `START-GM-TOOL.cmd` updated to v2.0 header + WARN if the two UTF-8 data files are missing (falls back to English labels / empty buff list).
+- **Validation:** ASCII OK, `()`/`{}`/`[]` balance 0 after string-strip, 44 functions all defined-and-called, zero refs to removed controls, `sa password` count 0, no Arabic codepoints in .ps1.
+- **Files for user to re-download:** `GM-Tool.ps1`, `GM-UI-ar.txt`, `GM-Buffs-ar.csv`, `START-GM-TOOL.cmd` (all four must sit in the same folder).
+
 ## 12) قالب تحديث المحادثة القادمة
 
 انسخ هذا القالب وأضفه في سجل المحادثات، ثم عدّل الأقسام المتأثرة:

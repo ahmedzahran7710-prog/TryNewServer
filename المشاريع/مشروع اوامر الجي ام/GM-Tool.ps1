@@ -1,23 +1,20 @@
 <#
-  RZ-GM Tool v1.7  --  Windows GUI for Rappelz 9.1
-  ASCII ONLY. Do not add non-ASCII characters to this file.
+  RZ-GM Tool v2.0  --  Tabbed Windows GUI for Rappelz 9.1
+  ASCII ONLY in this file. Arabic labels live in:
+    GM-UI-ar.txt    (UTF-8)  - UI strings
+    GM-Buffs-ar.csv (UTF-8)  - buff catalog (name / power / code / minutes)
 
-  PRIMARY GM tool (the in-game auction board was removed).
-  Talks to SQL Server directly (no console password needed).
-  Changes are stored in the database and take effect when the
-  character logs in (or relogs).
+  Tabs: Player | Buffs (Arabic) | Server-wide | Tools
+  Connection: 127.0.0.1 / Telecaster1 / rappelz / (empty pass)
 
-  Connection: Server=127.0.0.1  DB=Telecaster1
-              User=rappelz  Pass=(empty)  -> Connect
-
-  Run:  powershell -ExecutionPolicy Bypass -File .\GM-Tool.ps1
+  Run:  START-GM-TOOL.cmd   or
+        powershell -NoProfile -STA -ExecutionPolicy Bypass -File .\GM-Tool.ps1
 #>
 
 param([switch]$SelfTest)
 
 if ($SelfTest) {
-    Write-Host "GM-Tool.ps1 self-test: file loads and parses OK."
-    Write-Host "GUI needs Windows + .NET WinForms (PowerShell 5.1)."
+    Write-Host "GM-Tool.ps1 v2.0 self-test: file loads and parses OK."
     exit 0
 }
 
@@ -25,10 +22,22 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-# ---------------------------------------------------------------- helpers
+# ---------------------------------------------------------------- global state
 $script:Conn = $null
 $script:SelectedSid = $null
 $script:SelectedName = $null
+
+
+
+if ($SelfTest) {
+    Write-Host "GM-Tool.ps1 self-test: file loads and parses OK."
+    Write-Host "GUI needs Windows + .NET WinForms (PowerShell 5.1)."
+    exit 0
+}
+
+
+# ---------------------------------------------------------------- helpers
+
 
 function Log([string]$msg) {
     $ts = (Get-Date).ToString('HH:mm:ss')
@@ -95,6 +104,14 @@ function Load-Characters {
             $grid.Columns['permission'].Width = 70
         }
         Log "Loaded $($dt.Rows.Count) character(s)."
+        # fill buff-tab target dropdown
+        if (Get-Variable cmbTarget -ErrorAction SilentlyContinue) {
+            $script:cmbTarget.Items.Clear()
+            foreach ($r in $dt.Rows) {
+                [void]$script:cmbTarget.Items.Add([string]$r["name"] + " (sid " + [string]$r["sid"] + ")")
+            }
+            if ($script:cmbTarget.Items.Count -gt 0) { $script:cmbTarget.SelectedIndex = 0 }
+        }
     }
     catch { Log ("LOAD FAILED: " + $_.Exception.Message) }
 }
@@ -299,28 +316,6 @@ function Show-StateList {
     Log-Rows ("SELECT sid, code, level, duration, remain_time, enable FROM dbo.[State] WHERE owner_id=" + $sid + " ORDER BY code") ("buffs of " + $script:SelectedName) 40
 }
 
-function Do-SendBuff {
-    if (-not (Require-Backup)) { return }
-    $sid = Get-Sid; if ($sid -eq $null) { return }
-    $code = 0; if (-not [int]::TryParse($txtBuffCode.Text, [ref]$code)) { Log "Buff code must be a number."; return }
-    $lvl = 1;  if (-not [int]::TryParse($txtBuffLevel.Text, [ref]$lvl)) { Log "Buff level must be a number."; return }
-    $min = 10; if (-not [int]::TryParse($txtBuffMin.Text, [ref]$min)) { Log "Minutes must be a number."; return }
-    if ($code -le 0) { Log "Buff code must be greater than 0."; return }
-    if ($min -lt 1 -or $min -gt 720) { Log "Minutes must be 1..720."; return }
-    $dur = [int]($min * 60000)
-    $sql = "DELETE FROM dbo.[State] WHERE owner_id=@cid AND code=@code; " +
-           "DECLARE @nsid INT; SELECT @nsid = ISNULL(MAX(sid),0) + 1 FROM dbo.[State]; " +
-           "EXEC dbo.smp_insert_state @IN_SID=@nsid, @IN_OWNER_ID=@cid, @IN_SUMMON_ID=0, " +
-           "@IN_CODE=@code, @IN_LEVEL=@lvl, @IN_DURATION=@dur, @IN_REMAIN_TIME=@dur, " +
-           "@IN_BASE_DAMAGE=0, @IN_REMAIN_FIRE_TIME=0, @IN_STATE_VALUE=0, " +
-           "@IN_STATE_STRING_VALUE=N'', @IN_ENABLE=1"
-    Log ("buff " + $code + " lv" + $lvl + " for " + $min + " min -> " + $script:SelectedName + " ...")
-    $ok = Exec $sql @{ '@cid' = $sid; '@code' = $code; '@lvl' = $lvl; '@dur' = $dur }
-    if ($ok) {
-        Log "DONE. The player must relog to see the buff."
-        Show-StateList
-    }
-}
 
 function Do-ClearBuffs {
     if (-not (Require-Backup)) { return }
@@ -342,7 +337,9 @@ function Do-BlessAll {
         @(1015,150), @(4102,50),  @(1513,60),  @(1507,50)
     )
     $min = 720
-    if (-not [int]::TryParse($txtBuffMin.Text, [ref]$min)) { $min = 720 }
+    if ($script:Root -and (Get-Command Get-DurMinutes -ErrorAction SilentlyContinue)) {
+        $min = Get-DurMinutes
+    }
     if ($min -lt 1 -or $min -gt 720) { $min = 720 }
     $dur = [int]($min * 60000)
     $ans = [System.Windows.Forms.MessageBox]::Show(
@@ -460,87 +457,171 @@ function Do-BlockAccount {
     catch { Log ("BLOCK FAILED: " + $_.Exception.Message) }
 }
 
-# ---------------------------------------------------------------- form
+
+# ============================================================
+#  DATA FILES (UTF-8) - Arabic labels live here, not in this file
+# ============================================================
+$script:Root = $PSScriptRoot
+if ([string]::IsNullOrEmpty($script:Root)) { $script:Root = (Get-Location).Path }
+$script:UI = @{}
+$script:BuffCat = @()
+
+function Load-Utf8Lines([string]$path) {
+    if (-not (Test-Path $path)) { return @() }
+    return [System.IO.File]::ReadAllLines($path, [System.Text.Encoding]::UTF8)
+}
+
+function Load-UiStrings {
+    $p = Join-Path $script:Root "GM-UI-ar.txt"
+    foreach ($line in (Load-Utf8Lines $p)) {
+        $t = $line.Trim()
+        if ($t -eq "" -or $t.StartsWith("#")) { continue }
+        $i = $t.IndexOf("=")
+        if ($i -gt 0) {
+            $k = $t.Substring(0, $i)
+            $v = $t.Substring($i + 1)
+            $script:UI[$k] = $v
+        }
+    }
+}
+function U([string]$k, [string]$fb) {
+    if ($script:UI.ContainsKey($k)) { return $script:UI[$k] }
+    return $fb
+}
+
+function Load-BuffCatalog {
+    $script:BuffCat = @()
+    $p = Join-Path $script:Root "GM-Buffs-ar.csv"
+    foreach ($line in (Load-Utf8Lines $p)) {
+        $t = $line.Trim()
+        if ($t -eq "" -or $t.StartsWith("#")) { continue }
+        $p2 = $t.Split(",")
+        if ($p2.Count -ge 4) {
+            $script:BuffCat += ,@{
+                Code  = [int]$p2[0].Trim()
+                Power = [int]$p2[1].Trim()
+                Min   = [int]$p2[2].Trim()
+                Name  = $p2[3].Trim()
+            }
+        }
+    }
+}
+
+Load-UiStrings
+Load-BuffCatalog
+
+# ============================================================
+#  FORM + CONNECTION ROW
+# ============================================================
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "RZ-GM Tool v1.7  -  Rappelz 9.1"
-$form.Size = New-Object System.Drawing.Size(980, 740)
+$form.Text = "RZ-GM Tool v2.0  -  Rappelz 9.1"
+$form.Size = New-Object System.Drawing.Size(1000, 780)
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 
-# --- connection row
 $lbl1 = New-Object System.Windows.Forms.Label
 $lbl1.Text = "Server"; $lbl1.Location = New-Object System.Drawing.Point(10, 14); $lbl1.Size = New-Object System.Drawing.Size(50, 20)
 $form.Controls.Add($lbl1)
 
 $txtServer = New-Object System.Windows.Forms.TextBox
 $txtServer.Text = "127.0.0.1"
-$txtServer.Location = New-Object System.Drawing.Point(62, 11); $txtServer.Size = New-Object System.Drawing.Size(230, 24)
+$txtServer.Location = New-Object System.Drawing.Point(62, 11); $txtServer.Size = New-Object System.Drawing.Size(200, 24)
 $form.Controls.Add($txtServer)
 
 $lbl2 = New-Object System.Windows.Forms.Label
-$lbl2.Text = "DB"; $lbl2.Location = New-Object System.Drawing.Point(300, 14); $lbl2.Size = New-Object System.Drawing.Size(30, 20)
+$lbl2.Text = "DB"; $lbl2.Location = New-Object System.Drawing.Point(270, 14); $lbl2.Size = New-Object System.Drawing.Size(30, 20)
 $form.Controls.Add($lbl2)
 
 $txtDb = New-Object System.Windows.Forms.TextBox
 $txtDb.Text = "Telecaster1"
-$txtDb.Location = New-Object System.Drawing.Point(332, 11); $txtDb.Size = New-Object System.Drawing.Size(110, 24)
+$txtDb.Location = New-Object System.Drawing.Point(302, 11); $txtDb.Size = New-Object System.Drawing.Size(110, 24)
 $form.Controls.Add($txtDb)
 
 $lbl3 = New-Object System.Windows.Forms.Label
-$lbl3.Text = "User"; $lbl3.Location = New-Object System.Drawing.Point(450, 14); $lbl3.Size = New-Object System.Drawing.Size(36, 20)
+$lbl3.Text = "User"; $lbl3.Location = New-Object System.Drawing.Point(420, 14); $lbl3.Size = New-Object System.Drawing.Size(36, 20)
 $form.Controls.Add($lbl3)
 
 $txtUser = New-Object System.Windows.Forms.TextBox
 $txtUser.Text = "rappelz"
-$txtUser.Location = New-Object System.Drawing.Point(488, 11); $txtUser.Size = New-Object System.Drawing.Size(90, 24)
+$txtUser.Location = New-Object System.Drawing.Point(458, 11); $txtUser.Size = New-Object System.Drawing.Size(90, 24)
 $form.Controls.Add($txtUser)
 
 $lbl4 = New-Object System.Windows.Forms.Label
-$lbl4.Text = "Pass"; $lbl4.Location = New-Object System.Drawing.Point(586, 14); $lbl4.Size = New-Object System.Drawing.Size(36, 20)
+$lbl4.Text = "Pass"; $lbl4.Location = New-Object System.Drawing.Point(556, 14); $lbl4.Size = New-Object System.Drawing.Size(36, 20)
 $form.Controls.Add($lbl4)
 
 $txtPass = New-Object System.Windows.Forms.TextBox
 $txtPass.UseSystemPasswordChar = $true
-$txtPass.Location = New-Object System.Drawing.Point(624, 11); $txtPass.Size = New-Object System.Drawing.Size(90, 24)
+$txtPass.Location = New-Object System.Drawing.Point(594, 11); $txtPass.Size = New-Object System.Drawing.Size(90, 24)
 $form.Controls.Add($txtPass)
 
 $btnConnect = New-Object System.Windows.Forms.Button
 $btnConnect.Text = "Connect"
-$btnConnect.Location = New-Object System.Drawing.Point(722, 9); $btnConnect.Size = New-Object System.Drawing.Size(90, 26)
+$btnConnect.Location = New-Object System.Drawing.Point(692, 9); $btnConnect.Size = New-Object System.Drawing.Size(90, 26)
 $btnConnect.Add_Click({ Connect-Db })
 $form.Controls.Add($btnConnect)
 
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Text = "Not connected"
 $lblStatus.ForeColor = [System.Drawing.Color]::Red
-$lblStatus.Location = New-Object System.Drawing.Point(818, 14); $lblStatus.Size = New-Object System.Drawing.Size(100, 20)
+$lblStatus.Location = New-Object System.Drawing.Point(790, 14); $lblStatus.Size = New-Object System.Drawing.Size(110, 20)
 $form.Controls.Add($lblStatus)
 
-# --- filter
-$txtFilter = New-Object System.Windows.Forms.TextBox
-$txtFilter.Location = New-Object System.Drawing.Point(62, 44); $txtFilter.Size = New-Object System.Drawing.Size(200, 24)
-$form.Controls.Add($txtFilter)
+$lblSel = New-Object System.Windows.Forms.Label
+$lblSel.Text = (U "lbl.selected" "Selected") + ": none"
+$lblSel.Location = New-Object System.Drawing.Point(10, 44); $lblSel.Size = New-Object System.Drawing.Size(960, 20)
+$form.Controls.Add($lblSel)
 
+# ============================================================
+#  TAB CONTROL
+# ============================================================
+$tabs = New-Object System.Windows.Forms.TabControl
+$tabs.Location = New-Object System.Drawing.Point(10, 68)
+$tabs.Size = New-Object System.Drawing.Size(964, 520)
+$form.Controls.Add($tabs)
+
+$tabPlayer = New-Object System.Windows.Forms.TabPage
+$tabPlayer.Text = U "tab.player" "Player"
+$tabs.TabPages.Add($tabPlayer)
+
+$tabBuffs = New-Object System.Windows.Forms.TabPage
+$tabBuffs.Text = U "tab.buffs" "Buffs"
+$tabs.TabPages.Add($tabBuffs)
+
+$tabGroup = New-Object System.Windows.Forms.TabPage
+$tabGroup.Text = U "tab.group" "Server-wide"
+$tabs.TabPages.Add($tabGroup)
+
+$tabTools = New-Object System.Windows.Forms.TabPage
+$tabTools.Text = U "tab.tools" "Tools"
+$tabs.TabPages.Add($tabTools)
+
+# ------------------------------------------------------------
+# TAB 1: PLAYER
+# ------------------------------------------------------------
 $lblF = New-Object System.Windows.Forms.Label
-$lblF.Text = "Name"
-$lblF.Location = New-Object System.Drawing.Point(10, 47); $lblF.Size = New-Object System.Drawing.Size(50, 20)
-$form.Controls.Add($lblF)
+$lblF.Text = (U "btn.search" "Search")
+$lblF.Location = New-Object System.Drawing.Point(10, 14); $lblF.Size = New-Object System.Drawing.Size(50, 20)
+$tabPlayer.Controls.Add($lblF)
+
+$txtFilter = New-Object System.Windows.Forms.TextBox
+$txtFilter.Location = New-Object System.Drawing.Point(62, 11); $txtFilter.Size = New-Object System.Drawing.Size(180, 24)
+$tabPlayer.Controls.Add($txtFilter)
 
 $btnLoad = New-Object System.Windows.Forms.Button
 $btnLoad.Text = "Search"
-$btnLoad.Location = New-Object System.Drawing.Point(268, 42); $btnLoad.Size = New-Object System.Drawing.Size(80, 26)
+$btnLoad.Location = New-Object System.Drawing.Point(250, 9); $btnLoad.Size = New-Object System.Drawing.Size(80, 26)
 $btnLoad.Add_Click({ Load-Characters })
-$form.Controls.Add($btnLoad)
+$tabPlayer.Controls.Add($btnLoad)
 
 $chkBackup = New-Object System.Windows.Forms.CheckBox
-$chkBackup.Text = "I have a backup (required before any write)"
-$chkBackup.Location = New-Object System.Drawing.Point(360, 45); $chkBackup.Size = New-Object System.Drawing.Size(320, 22)
-$form.Controls.Add($chkBackup)
+$chkBackup.Text = U "chk.backup" "I have a backup (required before edits)"
+$chkBackup.Location = New-Object System.Drawing.Point(350, 13); $chkBackup.Size = New-Object System.Drawing.Size(400, 22)
+$tabPlayer.Controls.Add($chkBackup)
 
-# --- grid
 $grid = New-Object System.Windows.Forms.DataGridView
-$grid.Location = New-Object System.Drawing.Point(10, 78)
-$grid.Size = New-Object System.Drawing.Size(560, 190)
+$grid.Location = New-Object System.Drawing.Point(10, 46)
+$grid.Size = New-Object System.Drawing.Size(540, 420)
 $grid.ReadOnly = $true
 $grid.AllowUserToAddRows = $false
 $grid.SelectionMode = 'FullRowSelect'
@@ -550,381 +631,455 @@ $grid.Add_SelectionChanged({
     if ($grid.CurrentRow -ne $null) {
         $script:SelectedSid = $grid.CurrentRow.Cells['sid'].Value
         $script:SelectedName = $grid.CurrentRow.Cells['name'].Value
-        $lblSel.Text = "Selected: $($script:SelectedName) (sid $($script:SelectedSid))"
+        $lblSel.Text = (U "lbl.selected" "Selected") + ": $($script:SelectedName) (sid $($script:SelectedSid))"
+        if ($script:lblBuffTarget) { $script:lblBuffTarget.Text = (U "lbl.target" "Target player") + ": $($script:SelectedName)" }
+        if ($script:cmbTarget) {
+            $want = "$($script:SelectedName) (sid $($script:SelectedSid))"
+            $idx = $script:cmbTarget.Items.IndexOf($want)
+            if ($idx -ge 0 -and $script:cmbTarget.SelectedIndex -ne $idx) {
+                $script:cmbTarget.SelectedIndex = $idx
+            }
+        }
     }
 })
-$form.Controls.Add($grid)
+$tabPlayer.Controls.Add($grid)
 
-$lblSel = New-Object System.Windows.Forms.Label
-$lblSel.Text = "Selected: none"
-$lblSel.Location = New-Object System.Drawing.Point(10, 272); $lblSel.Size = New-Object System.Drawing.Size(560, 20)
-$form.Controls.Add($lblSel)
-
-# --- right panel
-$x = 584
-function New-Label($text, $y) {
+$rx = 566
+function New-RLabel($tab, $text, $y) {
     $l = New-Object System.Windows.Forms.Label
     $l.Text = $text
-    $l.Location = New-Object System.Drawing.Point($x, $y)
+    $l.Location = New-Object System.Drawing.Point($rx, $y)
     $l.Size = New-Object System.Drawing.Size(70, 20)
-    $form.Controls.Add($l)
+    $tab.Controls.Add($l)
 }
-function New-Text($text, $y, $w) {
+function New-RText($tab, $text, $y, $w) {
     $t = New-Object System.Windows.Forms.TextBox
     $t.Text = $text
-    $t.Location = New-Object System.Drawing.Point(($x + 74), $y)
+    $t.Location = New-Object System.Drawing.Point(($rx + 74), $y)
     $t.Size = New-Object System.Drawing.Size($w, 24)
-    $form.Controls.Add($t)
+    $tab.Controls.Add($t)
     return $t
 }
-function New-Button($text, $y, $handler) {
+function New-RButton($tab, $text, $y, $handler) {
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $text
+    $b.Location = New-Object System.Drawing.Point($rx, $y)
+    $b.Size = New-Object System.Drawing.Size(370, 26)
+    $b.Add_Click($handler)
+    $tab.Controls.Add($b)
+}
+
+New-RLabel $tabPlayer "Gold =" 10
+$txtGold = New-RText $tabPlayer "1000000" 10 140
+New-RLabel $tabPlayer "Add" 40
+$txtAddGold = New-RText $tabPlayer "100000" 40 140
+New-RButton $tabPlayer "Set gold (exact)" 70 { Do-SetGold }
+New-RButton $tabPlayer "Add gold" 100 { Do-AddGold }
+
+New-RLabel $tabPlayer "Level =" 136
+$txtLevel = New-RText $tabPlayer "200" 136 140
+New-RButton $tabPlayer "Set level" 166 { Do-SetLevel }
+
+New-RLabel $tabPlayer "Exp" 200
+$txtExp = New-RText $tabPlayer "1000000" 200 100
+$lblJp = New-Object System.Windows.Forms.Label
+$lblJp.Text = "JP"
+$lblJp.Location = New-Object System.Drawing.Point(($rx + 184), 203)
+$lblJp.Size = New-Object System.Drawing.Size(24, 20)
+$tabPlayer.Controls.Add($lblJp)
+$txtJp = New-Object System.Windows.Forms.TextBox
+$txtJp.Text = "0"
+$txtJp.Location = New-Object System.Drawing.Point(($rx + 210), 200)
+$txtJp.Size = New-Object System.Drawing.Size(134, 24)
+$tabPlayer.Controls.Add($txtJp)
+New-RButton $tabPlayer "Add exp / jp" 230 { Do-AddExp }
+
+New-RLabel $tabPlayer "Perm =" 264
+$txtPerm = New-RText $tabPlayer "100" 264 140
+New-RButton $tabPlayer "Set permission" 294 { Do-SetPermission }
+
+$lblTp = New-Object System.Windows.Forms.Label
+$lblTp.Text = "Teleport  x / y / z / layer"
+$lblTp.Location = New-Object System.Drawing.Point($rx, 330)
+$lblTp.Size = New-Object System.Drawing.Size(220, 20)
+$tabPlayer.Controls.Add($lblTp)
+
+$txtX = New-Object System.Windows.Forms.TextBox
+$txtX.Text = "0"; $txtX.Location = New-Object System.Drawing.Point($rx, 354); $txtX.Size = New-Object System.Drawing.Size(64, 24)
+$tabPlayer.Controls.Add($txtX)
+$txtY = New-Object System.Windows.Forms.TextBox
+$txtY.Text = "0"; $txtY.Location = New-Object System.Drawing.Point(($rx + 70), 354); $txtY.Size = New-Object System.Drawing.Size(64, 24)
+$tabPlayer.Controls.Add($txtY)
+$txtZ = New-Object System.Windows.Forms.TextBox
+$txtZ.Text = "0"; $txtZ.Location = New-Object System.Drawing.Point(($rx + 140), 354); $txtZ.Size = New-Object System.Drawing.Size(64, 24)
+$tabPlayer.Controls.Add($txtZ)
+$txtLayer = New-Object System.Windows.Forms.TextBox
+$txtLayer.Text = "1"; $txtLayer.Location = New-Object System.Drawing.Point(($rx + 210), 354); $txtLayer.Size = New-Object System.Drawing.Size(44, 24)
+$tabPlayer.Controls.Add($txtLayer)
+$btnTp = New-Object System.Windows.Forms.Button
+$btnTp.Text = "Teleport"
+$btnTp.Location = New-Object System.Drawing.Point(($rx + 262), 352); $btnTp.Size = New-Object System.Drawing.Size(108, 26)
+$btnTp.Add_Click({ Do-Teleport })
+$tabPlayer.Controls.Add($btnTp)
+
+New-RButton $tabPlayer "Show points" 392 { Show-Points }
+New-RButton $tabPlayer "Add talent_point +10" 422 { Do-AddTalent }
+
+# ------------------------------------------------------------
+# TAB 2: BUFFS
+# ------------------------------------------------------------
+$script:lblBuffTarget = New-Object System.Windows.Forms.Label
+$script:lblBuffTarget.Text = (U "lbl.target" "Target player") + ": none"
+$script:lblBuffTarget.Location = New-Object System.Drawing.Point(10, 10)
+$script:lblBuffTarget.Size = New-Object System.Drawing.Size(400, 20)
+$tabBuffs.Controls.Add($script:lblBuffTarget)
+
+$lblT2 = New-Object System.Windows.Forms.Label
+$lblT2.Text = (U "lbl.target" "Target player")
+$lblT2.Location = New-Object System.Drawing.Point(10, 38)
+$lblT2.Size = New-Object System.Drawing.Size(110, 20)
+$tabBuffs.Controls.Add($lblT2)
+
+$script:cmbTarget = New-Object System.Windows.Forms.ComboBox
+$script:cmbTarget.Location = New-Object System.Drawing.Point(120, 35)
+$script:cmbTarget.Size = New-Object System.Drawing.Size(260, 24)
+$script:cmbTarget.DropDownStyle = 'DropDownList'
+$script:cmbTarget.Add_SelectedIndexChanged({
+    $s = [string]$script:cmbTarget.SelectedItem
+    if ($s -match "\(sid (\d+)\)") {
+        $script:SelectedSid = [int]$Matches[1]
+        $script:SelectedName = ($s -replace " \(sid \d+\)", "")
+        $lblSel.Text = (U "lbl.selected" "Selected") + ": $($script:SelectedName) (sid $($script:SelectedSid))"
+        $script:lblBuffTarget.Text = (U "lbl.target" "Target player") + ": $($script:SelectedName)"
+    }
+})
+$tabBuffs.Controls.Add($script:cmbTarget)
+
+$lblD = New-Object System.Windows.Forms.Label
+$lblD.Text = (U "lbl.duration" "Duration")
+$lblD.Location = New-Object System.Drawing.Point(400, 38)
+$lblD.Size = New-Object System.Drawing.Size(60, 20)
+$tabBuffs.Controls.Add($lblD)
+
+$cmbDur = New-Object System.Windows.Forms.ComboBox
+$cmbDur.Location = New-Object System.Drawing.Point(462, 35)
+$cmbDur.Size = New-Object System.Drawing.Size(180, 24)
+$cmbDur.DropDownStyle = 'DropDownList'
+[void]$cmbDur.Items.Add((U "dur.1" "10 min"))
+[void]$cmbDur.Items.Add((U "dur.2" "1 hour"))
+[void]$cmbDur.Items.Add((U "dur.3" "2.5 hours"))
+[void]$cmbDur.Items.Add((U "dur.4" "720 min (12 h)"))
+$cmbDur.SelectedIndex = 1
+$tabBuffs.Controls.Add($cmbDur)
+
+$lblBL = New-Object System.Windows.Forms.Label
+$lblBL.Text = U "lbl.buffs_list" "Pick a buff (name / power / code)"
+$lblBL.Location = New-Object System.Drawing.Point(10, 68)
+$lblBL.Size = New-Object System.Drawing.Size(500, 20)
+$tabBuffs.Controls.Add($lblBL)
+
+$lvBuffs = New-Object System.Windows.Forms.ListView
+$lvBuffs.Location = New-Object System.Drawing.Point(10, 92)
+$lvBuffs.Size = New-Object System.Drawing.Size(630, 370)
+$lvBuffs.View = 'Details'
+$lvBuffs.FullRowSelect = $true
+$lvBuffs.GridLines = $true
+$lvBuffs.MultiSelect = $false
+[void]$lvBuffs.Columns.Add((U "col.name" "Buff"), 300)
+[void]$lvBuffs.Columns.Add((U "col.power" "Power"), 80)
+[void]$lvBuffs.Columns.Add((U "col.code" "Code"), 90)
+[void]$lvBuffs.Columns.Add((U "lbl.duration" "Duration"), 120)
+foreach ($b in $script:BuffCat) {
+    $it = New-Object System.Windows.Forms.ListViewItem($b.Name)
+    [void]$it.SubItems.Add("+" + $b.Power)
+    [void]$it.SubItems.Add([string]$b.Code)
+    [void]$it.SubItems.Add($b.Min.ToString() + " min")
+    $it.Tag = $b
+    [void]$lvBuffs.Items.Add($it)
+}
+$tabBuffs.Controls.Add($lvBuffs)
+
+$bx = 660
+function New-BButton($text, $y, $handler) {
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $text
+    $b.Location = New-Object System.Drawing.Point($bx, $y)
+    $b.Size = New-Object System.Drawing.Size(280, 32)
+    $b.Add_Click($handler)
+    $tabBuffs.Controls.Add($b)
+}
+
+function Get-DurMinutes {
+    switch ($cmbDur.SelectedIndex) {
+        0 { return 10 }
+        1 { return 60 }
+        2 { return 150 }
+        3 { return 720 }
+        default { return 60 }
+    }
+}
+
+function Do-SendBuffTab {
+    if (-not (Require-Backup)) { return }
+    $sid = Get-Sid; if ($sid -eq $null) { return }
+    if ($lvBuffs.SelectedItems.Count -lt 1) { Log "Pick a buff from the list first."; return }
+    $b = $lvBuffs.SelectedItems[0].Tag
+    $min = Get-DurMinutes
+    $dur = [int]($min * 60000)
+    $sql = "DELETE FROM dbo.[State] WHERE owner_id=@cid AND code=@code; " +
+           "DECLARE @nsid INT; SELECT @nsid = ISNULL(MAX(sid),0) + 1 FROM dbo.[State]; " +
+           "EXEC dbo.smp_insert_state @IN_SID=@nsid, @IN_OWNER_ID=@cid, @IN_SUMMON_ID=0, " +
+           "@IN_CODE=@code, @IN_LEVEL=@lvl, @IN_DURATION=@dur, @IN_REMAIN_TIME=@dur, " +
+           "@IN_BASE_DAMAGE=0, @IN_REMAIN_FIRE_TIME=0, @IN_STATE_VALUE=0, " +
+           "@IN_STATE_STRING_VALUE=N'', @IN_ENABLE=1"
+    Log ("buff [" + $b.Code + "] " + $b.Name + " +" + $b.Power + " / " + $min + " min -> " + $script:SelectedName + " ...")
+    $ok = Exec $sql @{ '@cid' = $sid; '@code' = $b.Code; '@lvl' = $b.Power; '@dur' = $dur }
+    if ($ok) {
+        Log "DONE. Target must relog to see the buff."
+        Show-StateList
+    }
+}
+
+New-BButton (U "btn.send_buff" "Send to selected") 92 { Do-SendBuffTab }
+New-BButton (U "btn.clear_buffs" "Clear selected buffs") 132 { Do-ClearBuffs }
+New-BButton (U "btn.bless" "Bless ALL (12 buffs)") 172 { Do-BlessAll }
+
+$lblHint = New-Object System.Windows.Forms.Label
+$lblHint.Text = "Note: chat commands also work in game:`r`n/run add_state(CODE,POWER,MS,`"NAME`")"
+$lblHint.Location = New-Object System.Drawing.Point($bx, 220)
+$lblHint.Size = New-Object System.Drawing.Size(280, 60)
+$tabBuffs.Controls.Add($lblHint)
+
+# ------------------------------------------------------------
+# TAB 3: SERVER-WIDE
+# ------------------------------------------------------------
+$grpRates = New-Object System.Windows.Forms.GroupBox
+$grpRates.Text = U "btn.rates" "Server rates (copy & paste in chat)"
+$grpRates.Location = New-Object System.Drawing.Point(10, 10)
+$grpRates.Size = New-Object System.Drawing.Size(460, 200)
+$tabGroup.Controls.Add($grpRates)
+
+$lblRH = New-Object System.Windows.Forms.Label
+$lblRH.Text = U "lbl.rates_help" "Pick a rate, command is copied, paste in game chat"
+$lblRH.Location = New-Object System.Drawing.Point(12, 22)
+$lblRH.Size = New-Object System.Drawing.Size(430, 36)
+$grpRates.Controls.Add($lblRH)
+
+function New-GButton($parent, $text, $y, $handler) {
+    $b = New-Object System.Windows.Forms.Button
+    $b.Text = $text
+    $b.Location = New-Object System.Drawing.Point(12, $y)
+    $b.Size = New-Object System.Drawing.Size(430, 34)
+    $b.Add_Click($handler)
+    $parent.Controls.Add($b)
+}
+
+function Copy-Chat([string]$cmd) {
+    try {
+        [System.Windows.Forms.Clipboard]::SetText($cmd)
+        Log ("COPIED: " + $cmd)
+        Log "Paste the command in game chat (needs permission = 100)."
+    }
+    catch {
+        Log ("Clipboard failed. Type manually: " + $cmd)
+    }
+}
+
+New-GButton $grpRates (U "btn.rate_exp" "EXP x300") 64 {
+    Copy-Chat '/run set_env("game.exp_rate","300")'
+}
+New-GButton $grpRates (U "btn.rate_drop" "DROP x200") 104 {
+    Copy-Chat '/run set_env("game.item_drop_rate","200")'
+}
+New-GButton $grpRates (U "btn.rate_gold" "GOLD x200") 144 {
+    Copy-Chat '/run set_env("game.gold_drop_rate","200")'
+}
+
+$grpState = New-Object System.Windows.Forms.GroupBox
+$grpState.Text = U "btn.group_state" "State buff for ALL players (SQL)"
+$grpState.Location = New-Object System.Drawing.Point(490, 10)
+$grpState.Size = New-Object System.Drawing.Size(454, 300)
+$tabGroup.Controls.Add($grpState)
+
+$lblGS = New-Object System.Windows.Forms.Label
+$lblGS.Text = "Applies to every non-deleted character:`r`n(takes effect after each player relogs)"
+$lblGS.Location = New-Object System.Drawing.Point(12, 22)
+$lblGS.Size = New-Object System.Drawing.Size(430, 40)
+$grpState.Controls.Add($lblGS)
+
+$cmbGroupBuff = New-Object System.Windows.Forms.ComboBox
+$cmbGroupBuff.Location = New-Object System.Drawing.Point(12, 70)
+$cmbGroupBuff.Size = New-Object System.Drawing.Size(430, 24)
+$cmbGroupBuff.DropDownStyle = 'DropDownList'
+foreach ($b in $script:BuffCat) {
+    [void]$cmbGroupBuff.Items.Add($b.Name + "  +" + $b.Power + "  [" + $b.Code + "]")
+}
+if ($cmbGroupBuff.Items.Count -gt 0) { $cmbGroupBuff.SelectedIndex = 0 }
+$grpState.Controls.Add($cmbGroupBuff)
+
+$cmbGroupDur = New-Object System.Windows.Forms.ComboBox
+$cmbGroupDur.Location = New-Object System.Drawing.Point(12, 104)
+$cmbGroupDur.Size = New-Object System.Drawing.Size(430, 24)
+$cmbGroupDur.DropDownStyle = 'DropDownList'
+[void]$cmbGroupDur.Items.Add((U "dur.1" "10 min"))
+[void]$cmbGroupDur.Items.Add((U "dur.2" "1 hour"))
+[void]$cmbGroupDur.Items.Add((U "dur.3" "2.5 hours"))
+[void]$cmbGroupDur.Items.Add((U "dur.4" "720 min (12 h)"))
+$cmbGroupDur.SelectedIndex = 1
+$grpState.Controls.Add($cmbGroupDur)
+
+function Do-GroupState {
+    if (-not (Require-Backup)) { return }
+    if ($script:Conn -eq $null) { Log "Not connected."; return }
+    if ($cmbGroupBuff.SelectedIndex -lt 0) { Log "Pick a buff first."; return }
+    $b = $script:BuffCat[$cmbGroupBuff.SelectedIndex]
+    $min = 60
+    switch ($cmbGroupDur.SelectedIndex) { 0 { $min = 10 } 1 { $min = 60 } 2 { $min = 150 } 3 { $min = 720 } }
+    $dur = [int]($min * 60000)
+    $ans = [System.Windows.Forms.MessageBox]::Show(
+        ("Apply " + $b.Name + " (+" + $b.Power + ", " + $min + " min) to ALL players?"),
+        "Confirm group buff", [System.Windows.Forms.MessageBoxButtons]::YesNo)
+    if ($ans -ne 'Yes') { Log "cancelled"; return }
+    $sql = "DECLARE @nsid INT; SELECT @nsid = ISNULL(MAX(sid), 0) FROM dbo.[State]; " +
+           "INSERT INTO dbo.[State] (sid, owner_id, summon_id, code, level, duration, remain_time, " +
+           "base_damage, remain_fire_time, state_value, state_string_value, enable) " +
+           "SELECT @nsid + ROW_NUMBER() OVER (ORDER BY c.sid), c.sid, 0, @code, @lvl, @dur, @dur, " +
+           "0, 0, 0, N'', 1 FROM dbo.[Character] c WHERE c.delete_time IS NULL;"
+    $cmd = $script:Conn.CreateCommand()
+    $cmd.CommandText = $sql
+    [void]$cmd.Parameters.AddWithValue("@code", $b.Code)
+    [void]$cmd.Parameters.AddWithValue("@lvl", $b.Power)
+    [void]$cmd.Parameters.AddWithValue("@dur", $dur)
+    try {
+        $n = $cmd.ExecuteNonQuery()
+        Log ("GROUP BUFF DONE: " + $b.Name + " -> " + $n + " row(s).")
+        Log "Every player sees the buff after relog."
+    }
+    catch { Log ("GROUP SQL FAILED: " + $_.Exception.Message) }
+}
+
+New-GButton $grpState (U "btn.apply_all" "Apply to everyone") 144 { Do-GroupState }
+
+$lblG2 = New-Object System.Windows.Forms.Label
+$lblG2.Text = "Or in chat (live world-wide):`r`n/run cast_world_state(CODE,POWER,MS)`r`nIf that function is missing, use the SQL button above."
+$lblG2.Location = New-Object System.Drawing.Point(12, 190)
+$lblG2.Size = New-Object System.Drawing.Size(430, 80)
+$grpState.Controls.Add($lblG2)
+
+# ------------------------------------------------------------
+# TAB 4: TOOLS
+# ------------------------------------------------------------
+$lblG = New-Object System.Windows.Forms.Label
+$lblG.Text = U "lbl.gift" "Gift code"
+$lblG.Location = New-Object System.Drawing.Point(10, 14)
+$lblG.Size = New-Object System.Drawing.Size(80, 20)
+$tabTools.Controls.Add($lblG)
+
+$txtItemCode = New-Object System.Windows.Forms.TextBox
+$txtItemCode.Text = "609040"
+$txtItemCode.Location = New-Object System.Drawing.Point(92, 11)
+$txtItemCode.Size = New-Object System.Drawing.Size(100, 24)
+$tabTools.Controls.Add($txtItemCode)
+
+$lblC = New-Object System.Windows.Forms.Label
+$lblC.Text = U "lbl.count" "Count"
+$lblC.Location = New-Object System.Drawing.Point(202, 14)
+$lblC.Size = New-Object System.Drawing.Size(50, 20)
+$tabTools.Controls.Add($lblC)
+
+$txtItemCnt = New-Object System.Windows.Forms.TextBox
+$txtItemCnt.Text = "1"
+$txtItemCnt.Location = New-Object System.Drawing.Point(254, 11)
+$txtItemCnt.Size = New-Object System.Drawing.Size(60, 24)
+$tabTools.Controls.Add($txtItemCnt)
+
+$btnSendItem = New-Object System.Windows.Forms.Button
+$btnSendItem.Text = U "btn.send_item" "Send gift to selected"
+$btnSendItem.Location = New-Object System.Drawing.Point(330, 9)
+$btnSendItem.Size = New-Object System.Drawing.Size(220, 28)
+$btnSendItem.Add_Click({ Do-SendItem })
+$tabTools.Controls.Add($btnSendItem)
+
+$btnSendAll = New-Object System.Windows.Forms.Button
+$btnSendAll.Text = U "btn.send_all" "Send to ALL (event)"
+$btnSendAll.Location = New-Object System.Drawing.Point(560, 9)
+$btnSendAll.Size = New-Object System.Drawing.Size(200, 28)
+$btnSendAll.Add_Click({ Do-SendItemAll })
+$tabTools.Controls.Add($btnSendAll)
+
+$txtQuery = New-Object System.Windows.Forms.TextBox
+$txtQuery.Location = New-Object System.Drawing.Point(10, 50)
+$txtQuery.Size = New-Object System.Drawing.Size(740, 24)
+$txtQuery.Font = New-Object System.Drawing.Font("Consolas", 9)
+$tabTools.Controls.Add($txtQuery)
+
+$btnQuery = New-Object System.Windows.Forms.Button
+$btnQuery.Text = U "btn.run_select" "Run SELECT"
+$btnQuery.Location = New-Object System.Drawing.Point(760, 48)
+$btnQuery.Size = New-Object System.Drawing.Size(160, 26)
+$btnQuery.Add_Click({ Do-SafeQuery })
+$tabTools.Controls.Add($btnQuery)
+
+function New-TButton($text, $x, $y, $w, $handler) {
     $b = New-Object System.Windows.Forms.Button
     $b.Text = $text
     $b.Location = New-Object System.Drawing.Point($x, $y)
-    $b.Size = New-Object System.Drawing.Size(330, 26)
+    $b.Size = New-Object System.Drawing.Size($w, 28)
     $b.Add_Click($handler)
-    $form.Controls.Add($b)
+    $tabTools.Controls.Add($b)
 }
 
-New-Label "Gold =" 76  | Out-Null
-$txtGold   = New-Text "1000000" 76 120
-New-Label "Add"    102 | Out-Null
-$txtAddGold= New-Text "100000"  102 120
-
-$y = 128
-New-Button "Set gold (exact)"      $y { Do-SetGold }    | Out-Null
-$y += 26
-New-Button "Add gold"              $y { Do-AddGold }    | Out-Null
-$y += 26
-
-New-Label "Level =" ($y + 3) | Out-Null
-$txtLevel = New-Text "200" $y 120
-$y += 26
-New-Button "Set level" $y { Do-SetLevel } | Out-Null
-$y += 26
-
-New-Label "Exp" ($y + 3) | Out-Null
-$txtExp = New-Text "1000000" $y 60
-
-$lblJp = New-Object System.Windows.Forms.Label
-$lblJp.Text = "JP"
-$lblJp.Location = New-Object System.Drawing.Point(($x + 190), ($y + 3))
-$lblJp.Size = New-Object System.Drawing.Size(24, 20)
-$form.Controls.Add($lblJp)
-
-$txtJp = New-Object System.Windows.Forms.TextBox
-$txtJp.Text = "0"
-$txtJp.Location = New-Object System.Drawing.Point(($x + 214), $y)
-$txtJp.Size = New-Object System.Drawing.Size(116, 24)
-$form.Controls.Add($txtJp)
-$y += 26
-New-Button "Add exp / jp" $y { Do-AddExp } | Out-Null
-$y += 26
-
-New-Label "Perm =" ($y + 3) | Out-Null
-$txtPerm = New-Text "0" $y 120
-$y += 26
-New-Button "Set permission" $y { Do-SetPermission } | Out-Null
-$y += 26
-
-# --- teleport block
-$lblTp = New-Object System.Windows.Forms.Label
-$lblTp.Text = "Teleport  x / y / z / layer"
-$lblTp.Location = New-Object System.Drawing.Point(10, 300)
-$lblTp.Size = New-Object System.Drawing.Size(200, 20)
-$form.Controls.Add($lblTp)
-
-$txtX = New-Object System.Windows.Forms.TextBox
-$txtX.Text = "0"; $txtX.Location = New-Object System.Drawing.Point(10, 322); $txtX.Size = New-Object System.Drawing.Size(70, 24)
-$form.Controls.Add($txtX)
-
-$txtY = New-Object System.Windows.Forms.TextBox
-$txtY.Text = "0"; $txtY.Location = New-Object System.Drawing.Point(86, 322); $txtY.Size = New-Object System.Drawing.Size(70, 24)
-$form.Controls.Add($txtY)
-
-$txtZ = New-Object System.Windows.Forms.TextBox
-$txtZ.Text = "0"; $txtZ.Location = New-Object System.Drawing.Point(162, 322); $txtZ.Size = New-Object System.Drawing.Size(70, 24)
-$form.Controls.Add($txtZ)
-
-$txtLayer = New-Object System.Windows.Forms.TextBox
-$txtLayer.Text = "1"; $txtLayer.Location = New-Object System.Drawing.Point(238, 322); $txtLayer.Size = New-Object System.Drawing.Size(50, 24)
-$form.Controls.Add($txtLayer)
-
-$btnTp = New-Object System.Windows.Forms.Button
-$btnTp.Text = "Teleport"
-$btnTp.Location = New-Object System.Drawing.Point(296, 320); $btnTp.Size = New-Object System.Drawing.Size(90, 26)
-$btnTp.Add_Click({ Do-Teleport })
-$form.Controls.Add($btnTp)
+New-TButton "Schema (read-only)" 10 90 220 { Do-Schema }
+New-TButton "Item delivery info" 240 90 220 { Do-ItemInfo }
+New-TButton "Gift prep" 470 90 180 { Do-GiftPrep }
+New-TButton "Buff prep" 660 90 160 { Do-BuffPrep }
+New-TButton "Find buff names" 10 126 220 { Do-FindStates }
+New-TButton "Show points" 240 126 180 { Show-Points }
+New-TButton "Block / unblock account" 430 126 220 { Do-BlockAccount }
+New-TButton "Set gold for ALL chars" 660 126 260 { Do-SetGoldAll }
 
 $chkBlock = New-Object System.Windows.Forms.CheckBox
-$chkBlock.Text = "block account"
-$chkBlock.Location = New-Object System.Drawing.Point(455, 491); $chkBlock.Size = New-Object System.Drawing.Size(120, 22)
-$form.Controls.Add($chkBlock)
+$chkBlock.Text = "block = ON (uncheck to unblock)"
+$chkBlock.Location = New-Object System.Drawing.Point(10, 166)
+$chkBlock.Size = New-Object System.Drawing.Size(260, 22)
+$tabTools.Controls.Add($chkBlock)
 
-$btnBlock = New-Object System.Windows.Forms.Button
-$btnBlock.Text = "Apply block flag"
-$btnBlock.Location = New-Object System.Drawing.Point(565, 488); $btnBlock.Size = New-Object System.Drawing.Size(100, 26)
-$btnBlock.Add_Click({ Do-BlockAccount })
-$form.Controls.Add($btnBlock)
+$txtTalent = New-Object System.Windows.Forms.TextBox
+$txtTalent.Text = "10"
+$txtTalent.Location = New-Object System.Drawing.Point(280, 164)
+$txtTalent.Size = New-Object System.Drawing.Size(70, 24)
+$tabTools.Controls.Add($txtTalent)
+New-TButton "Add talent" 360 162 140 { Do-AddTalent }
 
-$btnSchema = New-Object System.Windows.Forms.Button
-$btnSchema.Text = "Schema (read-only)"
-$btnSchema.Location = New-Object System.Drawing.Point(838, 430)
-$btnSchema.Size = New-Object System.Drawing.Size(1, 1)
-$btnSchema.Add_Click({ Do-Schema })
-$form.Controls.Add($btnSchema)
+$txtJpAdd = New-Object System.Windows.Forms.TextBox
+$txtJpAdd.Text = "1000"
+$txtJpAdd.Location = New-Object System.Drawing.Point(520, 164)
+$txtJpAdd.Size = New-Object System.Drawing.Size(80, 24)
+$tabTools.Controls.Add($txtJpAdd)
+New-TButton "Add jp" 610 162 120 { Do-AddJp }
 
-$btnAll = New-Object System.Windows.Forms.Button
-$btnAll.Text = "Set gold for ALL characters"
-$btnAll.Location = New-Object System.Drawing.Point(670, 488); $btnAll.Size = New-Object System.Drawing.Size(145, 26)
-$btnAll.Add_Click({ Do-SetGoldAll })
-$form.Controls.Add($btnAll)
-
-# --- log
+# ============================================================
+#  LOG
+# ============================================================
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = 'Vertical'
 $txtLog.ReadOnly = $true
-$txtLog.Location = New-Object System.Drawing.Point(10, 356)
-$txtLog.Size = New-Object System.Drawing.Size(920, 96)
+$txtLog.Location = New-Object System.Drawing.Point(10, 594)
+$txtLog.Size = New-Object System.Drawing.Size(964, 140)
 $form.Controls.Add($txtLog)
 
-$btnSchema2 = New-Object System.Windows.Forms.Button
-$btnSchema2.Text = "Print table/column names (read-only)"
-$btnSchema2.Location = New-Object System.Drawing.Point(10, 458)
-$btnSchema2.Size = New-Object System.Drawing.Size(260, 26)
-$btnSchema2.Add_Click({ Do-Schema })
-$form.Controls.Add($btnSchema2)
+# ============================================================
+#  BOOT
+# ============================================================
+$uiPath = Join-Path $script:Root "GM-UI-ar.txt"
+$bfPath = Join-Path $script:Root "GM-Buffs-ar.csv"
+if (-not (Test-Path $uiPath)) { Log ("WARNING: missing " + $uiPath + " - UI falls back to English.") }
+if (-not (Test-Path $bfPath)) { Log ("WARNING: missing " + $bfPath + " - buff list will be empty.") }
+Log ("RZ-GM Tool v2.0 ready - buff catalog: " + $script:BuffCat.Count + " entries (Arabic).")
+Log "Tabs: Player | Buffs | Server-wide | Tools"
+Log "1) Connect  2) Search  3) Tick backup  4) Pick a tab"
 
-
-$btnItemInfo = New-Object System.Windows.Forms.Button
-$btnItemInfo.Text = "Item delivery info (read-only)"
-$btnItemInfo.Location = New-Object System.Drawing.Point(280, 458)
-$btnItemInfo.Size = New-Object System.Drawing.Size(260, 26)
-$btnItemInfo.Add_Click({ Do-ItemInfo })
-$form.Controls.Add($btnItemInfo)
-
-$btnPoints = New-Object System.Windows.Forms.Button
-$btnPoints.Text = "Show points"
-$btnPoints.Location = New-Object System.Drawing.Point(820, 458)
-$btnPoints.Size = New-Object System.Drawing.Size(120, 26)
-$btnPoints.Add_Click({ Show-Points })
-$form.Controls.Add($btnPoints)
-
-$txtTalent = New-Object System.Windows.Forms.TextBox
-$txtTalent.Text = "10"
-$txtTalent.Location = New-Object System.Drawing.Point(180, 490)
-$txtTalent.Size = New-Object System.Drawing.Size(70, 24)
-$form.Controls.Add($txtTalent)
-
-$btnTalent = New-Object System.Windows.Forms.Button
-$btnTalent.Text = "Add talent_point"
-$btnTalent.Location = New-Object System.Drawing.Point(10, 488)
-$btnTalent.Size = New-Object System.Drawing.Size(160, 26)
-$btnTalent.Add_Click({ Do-AddTalent })
-$form.Controls.Add($btnTalent)
-
-$txtJpAdd = New-Object System.Windows.Forms.TextBox
-$txtJpAdd.Text = "1000"
-$txtJpAdd.Location = New-Object System.Drawing.Point(370, 490)
-$txtJpAdd.Size = New-Object System.Drawing.Size(80, 24)
-$form.Controls.Add($txtJpAdd)
-
-$btnJp = New-Object System.Windows.Forms.Button
-$btnJp.Text = "Add jp"
-$btnJp.Location = New-Object System.Drawing.Point(260, 488)
-$btnJp.Size = New-Object System.Drawing.Size(100, 26)
-$btnJp.Add_Click({ Do-AddJp })
-$form.Controls.Add($btnJp)
-
-
-$btnGiftPrep = New-Object System.Windows.Forms.Button
-$btnGiftPrep.Text = "Gift prep (read-only)"
-$btnGiftPrep.Location = New-Object System.Drawing.Point(550, 458)
-$btnGiftPrep.Size = New-Object System.Drawing.Size(260, 26)
-$btnGiftPrep.Add_Click({ Do-GiftPrep })
-$form.Controls.Add($btnGiftPrep)
-
-$txtQuery = New-Object System.Windows.Forms.TextBox
-$txtQuery.Location = New-Object System.Drawing.Point(10, 522)
-$txtQuery.Size = New-Object System.Drawing.Size(760, 24)
-$txtQuery.Font = New-Object System.Drawing.Font("Consolas", 9)
-$form.Controls.Add($txtQuery)
-
-$btnQuery = New-Object System.Windows.Forms.Button
-$btnQuery.Text = "Run SELECT"
-$btnQuery.Location = New-Object System.Drawing.Point(780, 520)
-$btnQuery.Size = New-Object System.Drawing.Size(150, 26)
-$btnQuery.Add_Click({ Do-SafeQuery })
-$form.Controls.Add($btnQuery)
-
-
-$lblGift = New-Object System.Windows.Forms.Label
-$lblGift.Text = "Gift item code"
-$lblGift.Location = New-Object System.Drawing.Point(10, 556)
-$lblGift.Size = New-Object System.Drawing.Size(100, 20)
-$form.Controls.Add($lblGift)
-
-$txtItemCode = New-Object System.Windows.Forms.TextBox
-$txtItemCode.Text = "609040"
-$txtItemCode.Location = New-Object System.Drawing.Point(112, 553)
-$txtItemCode.Size = New-Object System.Drawing.Size(100, 24)
-$form.Controls.Add($txtItemCode)
-
-$lblCnt = New-Object System.Windows.Forms.Label
-$lblCnt.Text = "count"
-$lblCnt.Location = New-Object System.Drawing.Point(222, 556)
-$lblCnt.Size = New-Object System.Drawing.Size(44, 20)
-$form.Controls.Add($lblCnt)
-
-$txtItemCnt = New-Object System.Windows.Forms.TextBox
-$txtItemCnt.Text = "1"
-$txtItemCnt.Location = New-Object System.Drawing.Point(266, 553)
-$txtItemCnt.Size = New-Object System.Drawing.Size(60, 24)
-$form.Controls.Add($txtItemCnt)
-
-$btnSendItem = New-Object System.Windows.Forms.Button
-$btnSendItem.Text = "Send gift to selected player"
-$btnSendItem.Location = New-Object System.Drawing.Point(340, 551)
-$btnSendItem.Size = New-Object System.Drawing.Size(220, 28)
-$btnSendItem.Add_Click({ Do-SendItem })
-$form.Controls.Add($btnSendItem)
-
-$btnSendAll = New-Object System.Windows.Forms.Button
-$btnSendAll.Text = "Send to ALL (event)"
-$btnSendAll.Location = New-Object System.Drawing.Point(570, 551)
-$btnSendAll.Size = New-Object System.Drawing.Size(200, 28)
-$btnSendAll.Add_Click({ Do-SendItemAll })
-$form.Controls.Add($btnSendAll)
-
-
-$btnBuffPrep = New-Object System.Windows.Forms.Button
-$btnBuffPrep.Text = "Buff prep (read-only)"
-$btnBuffPrep.Location = New-Object System.Drawing.Point(820, 488)
-$btnBuffPrep.Size = New-Object System.Drawing.Size(150, 26)
-$btnBuffPrep.Add_Click({ Do-BuffPrep })
-$form.Controls.Add($btnBuffPrep)
-
-
-$lblB1 = New-Object System.Windows.Forms.Label
-$lblB1.Text = "Buff code"
-$lblB1.Location = New-Object System.Drawing.Point(10, 592)
-$lblB1.Size = New-Object System.Drawing.Size(70, 20)
-$form.Controls.Add($lblB1)
-
-$txtBuffCode = New-Object System.Windows.Forms.TextBox
-$txtBuffCode.Text = ""
-$txtBuffCode.Location = New-Object System.Drawing.Point(82, 589)
-$txtBuffCode.Size = New-Object System.Drawing.Size(90, 24)
-$form.Controls.Add($txtBuffCode)
-
-$lblB2 = New-Object System.Windows.Forms.Label
-$lblB2.Text = "level"
-$lblB2.Location = New-Object System.Drawing.Point(182, 592)
-$lblB2.Size = New-Object System.Drawing.Size(36, 20)
-$form.Controls.Add($lblB2)
-
-$txtBuffLevel = New-Object System.Windows.Forms.TextBox
-$txtBuffLevel.Text = "1"
-$txtBuffLevel.Location = New-Object System.Drawing.Point(218, 589)
-$txtBuffLevel.Size = New-Object System.Drawing.Size(50, 24)
-$form.Controls.Add($txtBuffLevel)
-
-$lblB3 = New-Object System.Windows.Forms.Label
-$lblB3.Text = "minutes"
-$lblB3.Location = New-Object System.Drawing.Point(278, 592)
-$lblB3.Size = New-Object System.Drawing.Size(56, 20)
-$form.Controls.Add($lblB3)
-
-$txtBuffMin = New-Object System.Windows.Forms.TextBox
-$txtBuffMin.Text = "10"
-$txtBuffMin.Location = New-Object System.Drawing.Point(336, 589)
-$txtBuffMin.Size = New-Object System.Drawing.Size(50, 24)
-$form.Controls.Add($txtBuffMin)
-
-$btnSendBuff = New-Object System.Windows.Forms.Button
-$btnSendBuff.Text = "Send buff to selected"
-$btnSendBuff.Location = New-Object System.Drawing.Point(396, 587)
-$btnSendBuff.Size = New-Object System.Drawing.Size(170, 28)
-$btnSendBuff.Add_Click({ Do-SendBuff })
-$form.Controls.Add($btnSendBuff)
-
-$btnClearBuffs = New-Object System.Windows.Forms.Button
-$btnClearBuffs.Text = "Clear buffs"
-$btnClearBuffs.Location = New-Object System.Drawing.Point(576, 587)
-$btnClearBuffs.Size = New-Object System.Drawing.Size(110, 28)
-$btnClearBuffs.Add_Click({ Do-ClearBuffs })
-$form.Controls.Add($btnClearBuffs)
-
-$btnFindStates = New-Object System.Windows.Forms.Button
-$btnFindStates.Text = "Find buff names (read-only)"
-$btnFindStates.Location = New-Object System.Drawing.Point(696, 587)
-$btnFindStates.Size = New-Object System.Drawing.Size(200, 28)
-$btnFindStates.Add_Click({ Do-FindStates })
-$form.Controls.Add($btnFindStates)
-
-# --- buff presets (fills code + level + minutes; ASCII labels only)
-$lblPre = New-Object System.Windows.Forms.Label
-$lblPre.Text = "Preset"
-$lblPre.Location = New-Object System.Drawing.Point(10, 625)
-$lblPre.Size = New-Object System.Drawing.Size(50, 20)
-$form.Controls.Add($lblPre)
-
-$cmbPreset = New-Object System.Windows.Forms.ComboBox
-$cmbPreset.Location = New-Object System.Drawing.Point(62, 622)
-$cmbPreset.Size = New-Object System.Drawing.Size(330, 24)
-$cmbPreset.DropDownStyle = 'DropDownList'
-$buffPresets = @(
-    "ATK +150 (30m) [1007]",
-    "M.Atk +150 (30m) [1008]",
-    "DEF +250 (30m) [1009]",
-    "M.Def +450 (30m) [1010]",
-    "Atk Spd +90 (30m) [1011]",
-    "Cast Spd +50 (30m) [1012]",
-    "Move Spd +150 (30m) [1013]",
-    "Accuracy +100 (30m) [1014]",
-    "Evasion +150 (30m) [1015]",
-    "Exp x2 +50 (2.5h) [4102]",
-    "Max HP +60 (30m) [1513]",
-    "Luck +50 (30m) [1507]",
-    "ALL self bless (~23 days)"
-)
-foreach ($p in $buffPresets) { [void]$cmbPreset.Items.Add($p) }
-$cmbPreset.Add_SelectedIndexChanged({
-    $i = $cmbPreset.SelectedIndex
-    if ($i -lt 0) { return }
-    if ($i -eq 12) {
-        # permanent blessing: send every preset code with max minutes
-        $txtBuffCode.Text = "1007,1008,1009,1010,1011,1012,1013,1014,1015,4102,1513,1507"
-        $txtBuffLevel.Text = "5"
-        $txtBuffMin.Text = "720"
-        Log "Preset = ALL bless: press [Send buff] once per code, or use Clear+loop."
-        Log "Tip: for a single quick buff pick one line above instead."
-        return
-    }
-    $map = @(
-        @(1007,150,30), @(1008,150,30), @(1009,250,30), @(1010,450,30),
-        @(1011,90,30),  @(1012,50,30),  @(1013,150,30), @(1014,100,30),
-        @(1015,150,30), @(4102,50,150), @(1513,60,30),  @(1507,50,30)
-    )
-    $txtBuffCode.Text  = [string]$map[$i][0]
-    $txtBuffLevel.Text = [string]$map[$i][1]
-    $txtBuffMin.Text   = [string]$map[$i][2]
-})
-$form.Controls.Add($cmbPreset)
-
-$btnBless = New-Object System.Windows.Forms.Button
-$btnBless.Text = "Bless ALL (12 buffs, 720m) on selected"
-$btnBless.Location = New-Object System.Drawing.Point(402, 620)
-$btnBless.Size = New-Object System.Drawing.Size(280, 28)
-$btnBless.Add_Click({ Do-BlessAll })
-$form.Controls.Add($btnBless)
-
-Log "RZ-GM Tool v1.7 ready."
-Log "1) Connect   2) Search a name   3) Tick the backup box   4) Use the buttons"
-Log "The in-game auction board was removed. THIS tool is the GM control now."
-
-# auto-connect with the known-good combo (falls back silently)
 if ($txtServer.Text -eq "") { $txtServer.Text = "127.0.0.1" }
 if ($txtDb.Text -eq "")     { $txtDb.Text = "Telecaster1" }
 if ($txtUser.Text -eq "")   { $txtUser.Text = "rappelz" }
