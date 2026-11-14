@@ -1,18 +1,26 @@
 -- ============================================================
---  RZ-GM Board  v1.0
---  In-game GM command board + capability probe
---  Target: Rappelz Epic 9.1 (Revolution Team files)
+--  RZ-GM Board  v2.0
+--  Arabic tabbed GM board - Rappelz Epic 9.1 (Revolution)
+--
+--  DESIGN (user rules 2026-11-14):
+--   * Chat commands work:  /run add_state(code,val,ms,"Name")
+--   * Cross-player BY NAME works (4th argument)
+--   * Menus are organized tabs, Arabic labels, practical
+--   * Buff tab: Arabic name + code + power + duration
+--   * Target player name always visible
+--   * Server-wide buff button (rates + world states)
 --
 --  SAFE BY DESIGN
---   * every engine call is wrapped in pcall
---   * every missing function is detected, never assumed
+--   * every engine call wrapped in pcall
+--   * missing functions detected, never assumed
 --   * normal players see the ORIGINAL npc dialog unchanged
 --
---  ASCII ONLY - do not add non-ASCII characters to this file
+--  ENCODING: this source is UTF-8 (readable in git).
+--  INSTALL converts it to Windows-1256 for the game client.
 -- ============================================================
 
 GM = GM or {}
-GM.VERSION = "1.5"
+GM.VERSION = "2.0"
 GM.tag     = "[RZ-GM]"
 
 -- ============================================================
@@ -21,65 +29,76 @@ GM.tag     = "[RZ-GM]"
 
 GM.enabled = true
 
--- Characters that see the GM board instead of the normal npc dialog.
--- Put your GM character name here. Case sensitive.
+-- Characters that see the board instead of the normal npc dialog.
 GM.gm_names = { "OwnerZahran" }
 
--- Optional extra gate: require this item code in inventory.
--- 0 = disabled.
+-- Optional key item gate. 0 = disabled.
 GM.key_item = 0
 
--- Print a server-wide notice when a gift is granted?
--- v1.2: OFF. On this build the notice call returns "invalid argument" and
--- spams the console red. The board dialog already confirms every gift.
--- Turn on only after the "Plain test notice" option proves it works.
+-- Print a server-wide notice on gifts? (OFF until notice call proven)
 GM.announce = false
 
--- Target list for "Named player" menu (max 8 names).
-GM.players = { "OwnerZahran", "Zahran" }
+-- Named targets for the target picker (max 8).
+GM.players = { "OwnerZahran", "Admin" }
 
--- Gold amounts for the amount buttons.
-GM.amounts = { 1000, 10000, 100000, 1000000 }
-
--- Level operations: {"add", n} or {"set", n}
-GM.level_ops = {
-  { "add", 1   },
-  { "add", 10  },
-  { "add", 50  },
-  { "set", 200 }
-}
-
--- Exp / JP pairs granted by the buttons. { exp, jp }
-GM.exp_ops = {
-  { 100000,   0 },
-  { 1000000,  0 },
-  { 0,   100000 },
-  { 10000000, 1000000 }
-}
-
--- Buffs: { state_code, level, minutes }
--- Add your own codes here. Empty = buff menu is disabled.
+-- ---------- BUFF CATALOG ----------
+-- { state_code, power, "Arabic name" }
+-- power = value passed to add_state (قوة الباف)
 GM.buffs = {
-  -- { state_code, level, minutes }
-  { 1007, 5, 30 },   -- +ATK   (زيادة قوة الهجوم)
-  { 1009, 5, 30 },   -- +DEF   (زيادة قوة الدفاع)
-  { 1013, 5, 30 },   -- +speed (زيادة سرعة الحركة)
-  { 1513, 5, 30 },   -- +MAX HP
+  { 1007, 150, "زيادة قوة الهجوم" },
+  { 1008, 150, "زيادة قوة الهجوم السحري" },
+  { 1009, 250, "زيادة قوة الدفاع" },
+  { 1010, 450, "زيادة قوة الدفاع السحري" },
+  { 1011,  90, "زيادة سرعة الهجوم" },
+  { 1012,  50, "زيادة سرعة التفعيل" },
+  { 1013, 150, "زيادة سرعة الحركة" },
+  { 1014, 100, "زيادة الدقة" },
+  { 1015, 150, "زيادة المراوغة" },
+  { 4102,  50, "مضاعف الخبرة" },
+  { 1513,  60, "زيادة اقصى صحة" },
+  { 1507,  50, "زيادة الحظ" },
 }
 
--- Items: { item_code, count, "label" }
--- Empty = item menu is disabled.
+-- ---------- DURATION PICKER ----------
+-- { "Arabic label", milliseconds }
+GM.durations = {
+  { "10 دقائق",       600000 },
+  { "ساعة",          3600000 },
+  { "2.5 ساعة",      9000000 },
+  { "دائم (~23 يوم)", 2000000000 },
+}
+GM.duration_idx = 1   -- default: 10 minutes
+
+-- ---------- SERVER-WIDE RATES (set_env - affects EVERYONE) ----------
+-- { "Arabic label", env key, value }
+GM.rates = {
+  { "خبرة x300 للسيرفر",  "game.exp_rate",       "300" },
+  { "دروب x200 للسيرفر",  "game.item_drop_rate", "200" },
+  { "ذهب x200 للسيرفر",   "game.gold_drop_rate",  "200" },
+}
+
+-- ---------- WORLD STATE BUFFS (all online players at once) ----------
+-- try order: add_event_state -> cast_world_state
+GM.world_buffs = {
+  { 1013, 150, "سرعة حركة للكل" },
+  { 1007, 150, "هجوم للكل" },
+  { 4102,  50, "خبرة للكل" },
+}
+
+-- ---------- GIFTS ----------
+GM.amounts  = { 1000, 10000, 100000, 1000000 }
+GM.level_ops = {
+  { "add", 1  }, { "add", 10 }, { "add", 50 }, { "set", 200 },
+}
+GM.exp_ops = {
+  { 100000, 0 }, { 1000000, 0 }, { 0, 100000 }, { 10000000, 1000000 },
+}
 GM.items = {
-  -- { 1234, 1, "Test Item" },
+  -- { item_code, count, "Arabic label" },
 }
 
--- v1.5: duration used by the "permanent blessing" option (~23 days).
-GM.permanent_ms = 2000000000
-
--- Cross-player execution is OFF by default.
--- Enabling it makes the board call player-lookup functions that may not
--- exist on this build. Keep false unless the probe proves they exist.
-GM.allow_cross_player = false
+-- Buff page size (keep menus <= 8 lines - proven safe on this build)
+GM.page_size = 6
 
 -- ============================================================
 --  2) ENGINE BINDINGS
@@ -93,7 +112,6 @@ GM.fn.dlg_show   = dlg_show
 
 GM.fn.get_name   = get_name
 GM.fn.get_level  = get_level
-GM.fn.get_gold   = get_gold
 GM.fn.has_item   = has_item
 GM.fn.get_item_count = get_item_count
 
@@ -114,6 +132,12 @@ GM.fn.full_heal   = full_heal
 GM.fn.insert_item = insert_item
 GM.fn.give_item   = give_item
 
+-- server-wide tools
+GM.fn.set_env           = set_env
+GM.fn.get_env           = get_env
+GM.fn.add_event_state   = add_event_state
+GM.fn.cast_world_state  = cast_world_state
+
 GM.fn.notice_a = SCRIPT_BroadcastNotice
 GM.fn.notice_b = SCRIPT_Announce
 GM.fn.notice_c = broadcast_notice
@@ -121,25 +145,15 @@ GM.fn.notice_d = notice
 
 GM.fn.find_player = find_player
 GM.fn.get_player  = get_player_by_name
+GM.fn.get_player_b = get_pc_by_name
+GM.fn.get_player_c = get_pc
+GM.fn.is_online   = is_online
 
--- v1.3 probe bindings (may be nil on this build - the report tells us)
-GM.fn.get_player_b  = get_pc_by_name
-GM.fn.get_player_c  = get_pc
-GM.fn.find_pc       = find_pc
-GM.fn.is_online     = is_online
+GM.fn.add_level   = add_level
+GM.fn.set_lv      = set_lv
 
-GM.fn.add_level     = add_level
-GM.fn.set_lv        = set_lv
-GM.fn.get_lv        = get_lv
-
-GM.fn.add_skill     = add_skill_point
-GM.fn.set_skill     = set_skill_point
-GM.fn.get_skill     = get_skill_point
-GM.fn.add_stat      = add_stat_point
-GM.fn.set_stat      = set_stat_point
-
-GM.fn.gv            = gv
-GM.fn.get_value     = get_value
+GM.fn.gv     = gv
+GM.fn.get_value = get_value
 
 GM.fn.db_select = db_select
 GM.fn.db_exec   = db_exec
@@ -151,74 +165,61 @@ GM.fn.db_exec   = db_exec
 local function count(t)
   if t == nil then return 0 end
   if table.getn ~= nil then return table.getn(t) end
-  local n = 0
-  local k, v
+  local n, k, v
+  n = 0
   for k, v in pairs(t) do n = n + 1 end
   return n
 end
 
 local function log(msg)
   local line = GM.tag .. " " .. tostring(msg)
-  -- GameServer console uses message(); print() may not exist on every build
   if type(message) == "function" then pcall(message, line) end
   if type(print)   == "function" then pcall(print,   line) end
 end
-
 GM.log = log
 
 local function isfn(f)
   return type(f) == "function"
 end
 
--- pcall wrappers with fixed arity (safe on Lua 5.0 and 5.1)
 function GM.t0(f)
   if not isfn(f) then return false end
-  local ok = pcall(f)
-  return ok
+  return pcall(f)
 end
 
 function GM.t1(f, a)
   if not isfn(f) then return false end
-  local ok = pcall(f, a)
-  return ok
+  return pcall(f, a)
 end
 
 function GM.t2(f, a, b)
   if not isfn(f) then return false end
-  local ok = pcall(f, a, b)
-  return ok
+  return pcall(f, a, b)
 end
 
 function GM.t3(f, a, b, c)
   if not isfn(f) then return false end
-  local ok = pcall(f, a, b, c)
-  return ok
+  return pcall(f, a, b, c)
 end
 
 function GM.t4(f, a, b, c, d)
   if not isfn(f) then return false end
-  local ok = pcall(f, a, b, c, d)
-  return ok
+  return pcall(f, a, b, c, d)
 end
 
 -- current player name ("" if unavailable)
--- Reads the talking player's character name.
--- Different 9.1 builds expose different helpers, so we try them all.
 function GM.me()
-  -- a) get_name()
   if isfn(GM.fn.get_name) then
     local ok, n = pcall(GM.fn.get_name)
     if ok and n ~= nil and tostring(n) ~= "" then return tostring(n) end
   end
-
-  -- b) gv("name") / get_value("name")  (documented GS helpers)
   local helpers = { "gv", "get_value", "get_player_name", "get_char_name" }
-  local i, k
+  local i, f, ok, v
   for i = 1, #helpers do
-    local f = nil
+    f = nil
     if type(_G) == "table" then f = _G[helpers[i]] end
     if isfn(f) then
-      local ok, v = pcall(f, "name")
+      ok, v = pcall(f, "name")
       if (not ok) or v == nil then ok, v = pcall(f) end
       if ok and v ~= nil and tostring(v) ~= "" and tostring(v) ~= "name" then
         return tostring(v)
@@ -229,50 +230,33 @@ function GM.me()
 end
 
 function GM.my_level()
-  -- a) native getter
   if isfn(GM.fn.get_level) then
     local ok, v = pcall(GM.fn.get_level)
     if ok and type(v) == "number" then return v end
   end
-
-  -- b) documented GS value helpers: gv("level") / get_value("level")
   local names = { "gv", "get_value" }
   local keys  = { "level", "lv" }
-  local i, j
+  local i, j, f, ok, v
   for i = 1, #names do
-    local f = nil
+    f = nil
     if type(_G) == "table" then f = _G[names[i]] end
     if isfn(f) then
       for j = 1, #keys do
-        local ok, v = pcall(f, keys[j])
+        ok, v = pcall(f, keys[j])
         if ok and type(v) == "number" and v > 0 and v < 1000 then return v end
       end
     end
   end
-
-  -- c) other getters seen on 9.x builds
-    local other = { "get_lv", "get_level_value", "player_level" }
-  for i = 1, #other do
-    local f = nil
-    if type(_G) == "table" then f = _G[other[i]] end
-    if isfn(f) then
-      local ok, v = pcall(f)
-      if ok and type(v) == "number" and v > 0 and v < 1000 then return v end
-    end
-  end
-
   return nil
 end
 
 function GM.gate_ok()
   if GM.enabled ~= true then return false end
-
   local name = GM.me()
   local i
   for i = 1, count(GM.gm_names) do
     if name ~= "" and GM.gm_names[i] == name then return true end
   end
-
   if GM.key_item ~= 0 then
     if isfn(GM.fn.has_item) then
       local ok, v = pcall(GM.fn.has_item, GM.key_item)
@@ -282,8 +266,25 @@ function GM.gate_ok()
       if ok and type(v) == "number" and v > 0 then return true end
     end
   end
-
   return false
+end
+
+-- current target ("self" or a character name)
+function GM.cur_target()
+  if GM.target == nil or GM.target == "" then return "self" end
+  return GM.target
+end
+
+function GM.duration_ms()
+  local d = GM.durations[GM.duration_idx]
+  if d == nil then return 600000 end
+  return d[2]
+end
+
+function GM.duration_label()
+  local d = GM.durations[GM.duration_idx]
+  if d == nil then return "?" end
+  return d[1]
 end
 
 -- ============================================================
@@ -292,27 +293,24 @@ end
 
 local function show(title, text, list)
   if isfn(GM.fn.dlg_title) then GM.t1(GM.fn.dlg_title, title) end
-  if isfn(GM.fn.dlg_text) then  GM.t1(GM.fn.dlg_text, text)  end
-
+  if isfn(GM.fn.dlg_text)  then GM.t1(GM.fn.dlg_text, text)  end
   local i
   for i = 1, count(list) do
     if isfn(GM.fn.dlg_menu) then
       GM.t2(GM.fn.dlg_menu, list[i][1], list[i][2] .. "()")
     end
   end
-
   if isfn(GM.fn.dlg_show) then GM.t0(GM.fn.dlg_show) end
 end
 
 function GM.msg(title, text)
-  show(title, text, { { "Close", "gm_close" } })
+  show(title, text, { { "رجوع", "gm_main" }, { "اغلاق", "gm_close" } })
 end
 
 -- ============================================================
 --  5) ACTION ENGINE
 -- ============================================================
 
--- returns true if anything succeeded
 function GM.act_gold(n)
   if GM.t1(GM.fn.insert_gold, n) then return true end
   if GM.t1(GM.fn.add_gold, n)    then return true end
@@ -323,54 +321,64 @@ end
 
 function GM.act_level(mode, n)
   if mode == "set" then
-    if GM.t1(GM.fn.set_level, n) then log("set_level " .. n .. " ok"); return true end
-    if GM.t1(GM.fn.set_lv,    n) then log("set_lv " .. n .. " ok");    return true end
-    if GM.t2(GM.fn.set_value, "lv", n) then log("set_value lv ok"); return true end
-    if GM.t2(GM.fn.set_value, "level", n) then log("set_value level ok"); return true end
+    if GM.t1(GM.fn.set_level, n) then return true end
+    if GM.t1(GM.fn.set_lv,    n) then return true end
+    if GM.t2(GM.fn.set_value, "lv", n) then return true end
+    if GM.t2(GM.fn.set_value, "level", n) then return true end
     log("set level " .. n .. " FAILED - all setters refused")
     return false
   end
-
-  -- add mode: a native add_level also awards skill / stat points
-  if GM.t1(GM.fn.add_level, n) then log("add_level " .. n .. " ok"); return true end
-
+  if GM.t1(GM.fn.add_level, n) then return true end
   local cur = GM.my_level()
   if cur == nil then
-    -- v1.2 SAFETY: without a readable current level, "add" would have to
-    -- guess, and set_level(n) would SET the level to n instead of adding it.
     log("level add refused: current level unknown")
     return false
   end
   local target = cur + n
-  log("level add: cur=" .. tostring(cur) .. " target=" .. tostring(target))
-  if GM.t1(GM.fn.set_level, target) then log("set_level " .. target .. " ok (silent, no skill points)"); return true end
-  if GM.t1(GM.fn.set_lv, target) then log("set_lv " .. target .. " ok"); return true end
+  if GM.t1(GM.fn.set_level, target) then return true end
+  if GM.t1(GM.fn.set_lv,    target) then return true end
   if GM.t2(GM.fn.set_value, "lv", target) then return true end
   return false
 end
 
 function GM.act_exp(exp, jp)
   if GM.t2(GM.fn.add_exp_jp, exp, jp) then return true end
-  if exp ~= 0 and GM.t1(GM.fn.add_exp, exp) then return true end
-  if jp  ~= 0 and GM.t1(GM.fn.add_jp, jp)  then return true end
+  if exp > 0 and GM.t1(GM.fn.add_exp, exp) then return true end
+  if jp  > 0 and GM.t1(GM.fn.add_jp,  jp)  then return true end
   return false
 end
 
-function GM.act_buff(code, level, minutes)
-  local ms = minutes * 60000
-  if GM.t3(GM.fn.add_state, code, level, ms) then return true end
-  return false
+-- buff on CURRENT player
+function GM.act_buff_ms(code, value, ms)
+  return GM.t3(GM.fn.add_state, code, value, ms)
 end
 
--- v1.5: buff a player BY NAME (the 4th argument form used by GM commands)
-function GM.act_buff_to(name, code, level, ms)
+-- buff a player BY NAME (4th arg - confirmed working on this build)
+function GM.act_buff_to(name, code, value, ms)
   if name == nil or tostring(name) == "" then return false end
-  if GM.t4(GM.fn.add_state, code, level, ms, tostring(name)) then
-    log("add_state(name) ok -> " .. tostring(name))
-    return true
+  local ok = GM.t4(GM.fn.add_state, code, value, ms, tostring(name))
+  if ok then log("add_state(name) ok -> " .. tostring(name))
+  else log("add_state(name) REFUSED for " .. tostring(name)) end
+  return ok
+end
+
+-- SERVER-WIDE state buff: try event/world hooks (all players at once)
+-- returns name of the call that worked, or nil
+function GM.act_world_state(code, value, ms)
+  if GM.t2(GM.fn.add_event_state, code, value) then
+    log("add_event_state ok " .. code)
+    return "add_event_state"
   end
-  log("add_state(name) REFUSED for " .. tostring(name))
-  return false
+  if GM.t3(GM.fn.cast_world_state, code, value, ms) then
+    log("cast_world_state ok " .. code)
+    return "cast_world_state"
+  end
+  return nil
+end
+
+-- SERVER-WIDE rate (set_env - everyone, memory-only until restart)
+function GM.act_rate(key, val)
+  return GM.t2(GM.fn.set_env, key, val)
 end
 
 function GM.act_heal()
@@ -385,131 +393,102 @@ function GM.act_item(code, cnt)
   return false
 end
 
--- nil = not tested yet, true = works, false = dead (stop trying)
 GM.notice_state = nil
 
 function GM.act_notice(text)
   if GM.notice_state == false then return false end
-
-  -- 1) plain single-argument calls
   if GM.t1(GM.fn.notice_c, text) then GM.notice_state = true; return true end
   if GM.t1(GM.fn.notice_d, text) then GM.notice_state = true; return true end
-
-  -- 2) two-argument calls (text, type) - what SCRIPT_BroadcastNotice expects
   if GM.t2(GM.fn.notice_c, text, 0) then GM.notice_state = true; return true end
   if GM.t2(GM.fn.notice_a, text, 0) then GM.notice_state = true; return true end
   if GM.t2(GM.fn.notice_b, text, 0) then GM.notice_state = true; return true end
-
   GM.notice_state = false
   log("notice disabled: no working announce call on this build")
   return false
 end
 
--- Gift wrapper: action + optional server-wide announcement
 function GM.gift(label, ok, target_name)
   if not ok then
-    GM.msg("RZ-GM", label .. " : NOT SUPPORTED on this server build.\nOpen [Report] to see what is missing.")
+    GM.msg("RZ-GM", label .. " : غير مدعوم على هذا البناء.\nافتح [تقرير القدرات] لترى الناقص.")
     return
   end
-
   local who = target_name
   if who == nil or who == "" then who = GM.me() end
   if who == "" then who = "player" end
-
   if GM.announce == true then
     local text = "[GM] " .. who .. " received: " .. label
-    if not GM.act_notice(text) then
-      log("notice failed: " .. text)
-    end
+    GM.act_notice(text)
   end
-
-  GM.msg("RZ-GM", "Done: " .. label .. " -> " .. who)
+  GM.msg("RZ-GM", "تم: " .. label .. " -> " .. who)
 end
 
 -- ============================================================
 --  6) CAPABILITY PROBE / REPORT
 -- ============================================================
 
-GM.probe = {
-  { "dialog dlg_title",   GM.fn.dlg_title  },
-  { "dialog dlg_text",    GM.fn.dlg_text   },
-  { "dialog dlg_menu",    GM.fn.dlg_menu   },
-  { "dialog dlg_show",    GM.fn.dlg_show   },
-  { "player get_name",    GM.fn.get_name   },
-  { "player get_level",   GM.fn.get_level  },
-  { "player get_gold",    GM.fn.get_gold   },
-  { "player has_item",    GM.fn.has_item   },
-  { "gold set_value",     GM.fn.set_value  },
-  { "gold insert_gold",   GM.fn.insert_gold},
-  { "level set_level",    GM.fn.set_level  },
-  { "exp add_exp_jp",     GM.fn.add_exp_jp },
-  { "buff add_state",     GM.fn.add_state  },
-  { "heal heal",          GM.fn.heal       },
-  { "item insert_item",   GM.fn.insert_item},
-  { "notice Broadcast",   GM.fn.notice_a   },
-  { "notice Announce",    GM.fn.notice_b   },
-  { "notice broadcast",   GM.fn.notice_c   },
-  { "sql db_select",       GM.fn.db_select  },
-  { "sql db_exec",         GM.fn.db_exec    },
-  { "player find_player",  GM.fn.find_player },
-  { "player get_player",   GM.fn.get_player  },
-  { "player get_pc_by_nm", GM.fn.get_player_b},
-  { "player get_pc",       GM.fn.get_player_c},
-  { "player find_pc",      GM.fn.find_pc     },
-  { "player is_online",    GM.fn.is_online   },
-  { "level add_level",     GM.fn.add_level   },
-  { "level get_lv",        GM.fn.get_lv      },
-  { "skill add_skill_pt",  GM.fn.add_skill   },
-  { "skill set_skill_pt",  GM.fn.set_skill   },
-  { "skill get_skill_pt",  GM.fn.get_skill   },
-  { "stat add_stat_pt",    GM.fn.add_stat    },
-  { "stat set_stat_pt",    GM.fn.set_stat    },
-  { "value gv",            GM.fn.gv          },
-  { "value get_value",     GM.fn.get_value   },
-  { "exp add_exp",         GM.fn.add_exp     },
-  { "exp add_jp",          GM.fn.add_jp      }
+GM.probe_list = {
+  { "dialog dlg_title",    GM.fn.dlg_title  },
+  { "dialog dlg_text",     GM.fn.dlg_text   },
+  { "dialog dlg_menu",     GM.fn.dlg_menu   },
+  { "dialog dlg_show",     GM.fn.dlg_show   },
+  { "get_name",            GM.fn.get_name   },
+  { "gv / get_value",      GM.fn.gv         },
+  { "set_value",           GM.fn.set_value  },
+  { "insert_gold",         GM.fn.insert_gold},
+  { "set_level",           GM.fn.set_level  },
+  { "add_exp_jp",          GM.fn.add_exp_jp },
+  { "add_state",           GM.fn.add_state  },
+  { "heal",                GM.fn.heal       },
+  { "insert_item",         GM.fn.insert_item},
+  { "SCRIPT_BroadcastNotice", GM.fn.notice_a },
+  { "set_env",             GM.fn.set_env    },
+  { "add_event_state",     GM.fn.add_event_state },
+  { "cast_world_state",    GM.fn.cast_world_state },
+  { "find_player (cross)", GM.fn.find_player },
+  { "get_pc_by_name",      GM.fn.get_player_b },
+  { "is_online",           GM.fn.is_online  },
+  { "db_select (SQL)",     GM.fn.db_select  },
+  { "db_exec (SQL)",       GM.fn.db_exec    },
 }
 
 function GM.report_lines()
-  local out = {}
-  local i
-  for i = 1, count(GM.probe) do
-    local mark = "MISSING"
-    if isfn(GM.probe[i][2]) then mark = "OK" end
-    out[i] = GM.probe[i][1] .. " = " .. mark
+  local lines, i, p
+  lines = {}
+  for i = 1, count(GM.probe_list) do
+    p = GM.probe_list[i]
+    local st = "MISSING"
+    if isfn(p[2]) then st = "OK" end
+    lines[count(lines) + 1] = st .. "  " .. p[1]
   end
-  return out
+  return lines
 end
 
 function GM.report_dump()
-  log("---- capability report ----")
-  local l = GM.report_lines()
+  local lines = GM.report_lines()
   local i
-  for i = 1, count(l) do log(l[i]) end
-  log("---- end report ----")
+  for i = 1, count(lines) do log("probe | " .. lines[i]) end
 end
 
 function gm_report()
-  GM.report_dump()
-
-  local l = GM.report_lines()
-  local txt = ""
-  local i
-  for i = 1, count(l) do
-    if i <= 12 then txt = txt .. l[i] .. "\n" end
+  local lines = GM.report_lines()
+  local txt = "RZ-GM Report v" .. GM.VERSION .. "\n"
+  local i, n_ok, n_all
+  n_ok, n_all = 0, 0
+  for i = 1, count(lines) do
+    n_all = n_all + 1
+    if string.sub(lines[i], 1, 2) == "OK" then n_ok = n_ok + 1 end
+    if i <= 12 then txt = txt .. lines[i] .. "\n" end
   end
-  txt = txt .. "(full list printed to server console)"
-
+  txt = txt .. "(" .. n_ok .. "/" .. n_all .. " ok - full list in console)"
   GM.msg("RZ-GM Report", txt)
 end
 
 -- ============================================================
---  7) MENUS
+--  7) MENUS  (new tabbed structure - v2.0)
 -- ============================================================
 
 function gm_close()
   if isfn(GM.fn.dlg_show) then
-    -- an empty menu closes the window on most builds
     if isfn(GM.fn.dlg_title) then GM.t1(GM.fn.dlg_title, " ") end
     if isfn(GM.fn.dlg_text)  then GM.t1(GM.fn.dlg_text, " ")  end
     GM.t0(GM.fn.dlg_show)
@@ -518,315 +497,394 @@ end
 
 function gm_open()
   if GM.gate_ok() ~= true then
-    GM.msg("Restricted", "This board is for GM characters only.")
+    GM.msg("RZ-GM", "هذه اللوحة لشخصيات الجي ام فقط.")
     return
   end
+  GM.target  = GM.target or "self"
+  GM.buff_page = 1
   gm_main()
 end
 
+-- ---------- MAIN TAB ----------
 function gm_main()
-  local info = "RZ-GM Board v" .. GM.VERSION
-  info = info .. "\nPlayer: " .. GM.me()
-
+  local info = "RZ-GM v" .. GM.VERSION
+  info = info .. "\nاللاعب: " .. GM.me()
   local lv = GM.my_level()
-  if lv ~= nil then info = info .. "   Level: " .. tostring(lv) end
+  if lv ~= nil then info = info .. "  |  المستوى: " .. tostring(lv) end
+  info = info .. "\nالهدف الحالي: " .. GM.cur_target()
+  info = info .. "  |  المدة: " .. GM.duration_label()
 
   local list = {
-    { "Self - gold / level / exp / buff / item", "gm_t_self"  },
-    { "All online players",                      "gm_t_all"   },
-    { "Named player",                            "gm_t_named" },
-    { "Announce message",                        "gm_announce_menu" },
-    { "Capability report",                       "gm_report"  },
-    { "Close",                                   "gm_close"   }
+    { "استهداف لاعب",              "gm_target_menu" },
+    { "البفات",                    "gm_buff_menu"   },
+    { "بف جماعي للسيرفر كله",      "gm_world_menu"  },
+    { "هدايا (فلوس/خبرة/ايتم)",    "gm_gift_menu"   },
+    { "تقرير القدرات",             "gm_report"      },
+    { "اغلاق",                     "gm_close"       },
   }
-
-  show(info, "Choose a target:", list)
+  show("RZ-GM Board", info, list)
 end
 
-function gm_t_self()
-  GM.target = "self"
-  gm_actions()
-end
-
-function gm_t_all()
-  GM.target = "all"
-  gm_actions()
-end
-
-function gm_t_named()
+-- ---------- TARGET TAB ----------
+function gm_target_menu()
   local list = {}
+  list[count(list) + 1] = { "نفسي (الحالي)", "gm_tgt_self" }
   local i
-  for i = 1, 8 do
-    if GM.players[i] ~= nil then
-      list[count(list) + 1] = { GM.players[i], "gm_named" .. i }
+  for i = 1, count(GM.players) do
+    if count(list) < 7 then
+      list[count(list) + 1] = { GM.players[i], "gm_tgt" .. i }
     end
   end
-  list[count(list) + 1] = { "Back", "gm_main" }
-  show("RZ-GM", "Pick the receiving character:", list)
+  list[count(list) + 1] = { "رجوع", "gm_main" }
+  show("RZ-GM - استهداف لاعب", "اختر اللاعب المستهدف:\n(الهدف: " .. GM.cur_target() .. ")", list)
 end
 
-local function named_pick(n)
+function gm_tgt_self()
+  GM.target = "self"
+  gm_main()
+end
+
+local function pick_target(n)
   local name = GM.players[n]
-  if name == nil then
-    GM.msg("RZ-GM", "No name configured for slot " .. tostring(n))
+  if name == nil then return end
+  GM.target = name
+  gm_main()
+end
+
+function gm_tgt1() pick_target(1) end
+function gm_tgt2() pick_target(2) end
+function gm_tgt3() pick_target(3) end
+function gm_tgt4() pick_target(4) end
+function gm_tgt5() pick_target(5) end
+function gm_tgt6() pick_target(6) end
+function gm_tgt7() pick_target(7) end
+function gm_tgt8() pick_target(8) end
+
+-- ---------- BUFF TAB ----------
+function gm_buff_menu()
+  GM.buff_page = GM.buff_page or 1
+  local total = count(GM.buffs)
+  if total == 0 then
+    GM.msg("RZ-GM", "لا توجد بافات معرفة.\nعدّل GM.buffs في الملف ثم اعد الضغط.")
     return
   end
-  GM.target = name
-  gm_actions()
+  local first = (GM.buff_page - 1) * GM.page_size + 1
+  local last  = first + GM.page_size - 1
+  if last > total then last = total end
+
+  local list = {}
+  local i, b, lbl
+  for i = first, last do
+    b = GM.buffs[i]
+    lbl = "[" .. tostring(b[1]) .. "] " .. b[3] .. " +" .. tostring(b[2])
+    list[count(list) + 1] = { lbl, "gm_buf" .. i }
+  end
+  if last < total then
+    list[count(list) + 1] = { "التالي >>", "gm_buff_next" }
+  elseif first > 1 then
+    list[count(list) + 1] = { "<< السابق", "gm_buff_prev" }
+  end
+  if first > 1 and last < total then
+    -- both nav fit? keep simple: next has priority, prev added above only when no next
+  end
+  list[count(list) + 1] = { "المدة: " .. GM.duration_label() .. " (تغيير)", "gm_dur_menu" }
+  list[count(list) + 1] = { "رجوع", "gm_main" }
+
+  local txt = "الهدف: " .. GM.cur_target() .. "\n"
+  txt = txt .. "المدة: " .. GM.duration_label() .. "  |  صفحة " ..
+        tostring(GM.buff_page) .. "\nاختر الباف:"
+  show("RZ-GM - البفات", txt, list)
 end
 
-function gm_named1() named_pick(1) end
-function gm_named2() named_pick(2) end
-function gm_named3() named_pick(3) end
-function gm_named4() named_pick(4) end
-function gm_named5() named_pick(5) end
-function gm_named6() named_pick(6) end
-function gm_named7() named_pick(7) end
-function gm_named8() named_pick(8) end
+function gm_buff_next()
+  GM.buff_page = (GM.buff_page or 1) + 1
+  gm_buff_menu()
+end
 
-function gm_actions()
-  local t = GM.target
-  if t == nil then t = "self" end
+function gm_buff_prev()
+  GM.buff_page = (GM.buff_page or 1) - 1
+  if GM.buff_page < 1 then GM.buff_page = 1 end
+  gm_buff_menu()
+end
 
+local function apply_buff(i)
+  local b = GM.buffs[i]
+  if b == nil then return end
+  local code, value = b[1], b[2]
+  local ms = GM.duration_ms()
+  local t = GM.cur_target()
+  local ok
+  if t == "self" or t == GM.me() then
+    ok = GM.act_buff_ms(code, value, ms)
+  else
+    ok = GM.act_buff_to(t, code, value, ms)
+  end
+  GM.gift(b[3] .. " (+" .. tostring(value) .. ")", ok, t)
+end
+
+-- dynamic handlers: gm_buf1 .. gm_buf48
+function gm_buf1()  apply_buff(1)  end
+function gm_buf2()  apply_buff(2)  end
+function gm_buf3()  apply_buff(3)  end
+function gm_buf4()  apply_buff(4)  end
+function gm_buf5()  apply_buff(5)  end
+function gm_buf6()  apply_buff(6)  end
+function gm_buf7()  apply_buff(7)  end
+function gm_buf8()  apply_buff(8)  end
+function gm_buf9()  apply_buff(9)  end
+function gm_buf10() apply_buff(10) end
+function gm_buf11() apply_buff(11) end
+function gm_buf12() apply_buff(12) end
+function gm_buf13() apply_buff(13) end
+function gm_buf14() apply_buff(14) end
+function gm_buf15() apply_buff(15) end
+function gm_buf16() apply_buff(16) end
+function gm_buf17() apply_buff(17) end
+function gm_buf18() apply_buff(18) end
+function gm_buf19() apply_buff(19) end
+function gm_buf20() apply_buff(20) end
+function gm_buf21() apply_buff(21) end
+function gm_buf22() apply_buff(22) end
+function gm_buf23() apply_buff(23) end
+function gm_buf24() apply_buff(24) end
+
+-- ---------- DURATION SUB-TAB ----------
+function gm_dur_menu()
+  local list = {}
+  local i
+  for i = 1, count(GM.durations) do
+    local mark = "  "
+    if i == GM.duration_idx then mark = "* " end
+    list[count(list) + 1] = { mark .. GM.durations[i][1], "gm_dur" .. i }
+  end
+  list[count(list) + 1] = { "رجوع", "gm_buff_menu" }
+  show("RZ-GM - مدة الباف", "اختر المدة (تُطبق على كل البفات):", list)
+end
+
+local function set_dur(n)
+  if GM.durations[n] == nil then return end
+  GM.duration_idx = n
+  gm_buff_menu()
+end
+
+function gm_dur1() set_dur(1) end
+function gm_dur2() set_dur(2) end
+function gm_dur3() set_dur(3) end
+function gm_dur4() set_dur(4) end
+function gm_dur5() set_dur(5) end
+
+-- ---------- WORLD / SERVER-WIDE TAB ----------
+function gm_world_menu()
+  local list = {}
+  local i
+  for i = 1, count(GM.rates) do
+    list[count(list) + 1] = { GM.rates[i][1], "gm_rate" .. i }
+  end
+  for i = 1, count(GM.world_buffs) do
+    local b = GM.world_buffs[i]
+    list[count(list) + 1] = { "جماعي: " .. b[3] .. " +" .. tostring(b[2]), "gm_wbuf" .. i }
+  end
+  list[count(list) + 1] = { "رجوع", "gm_main" }
+  show("RZ-GM - بف جماعي",
+       "للسيرفر كله في وقت واحد:\n(المعدلات تعيد بعد اعادة التشغيل)", list)
+end
+
+local function do_rate(i)
+  local r = GM.rates[i]
+  if r == nil then return end
+  local ok = GM.act_rate(r[2], r[3])
+  if ok then
+    GM.msg("RZ-GM", "تم: " .. r[1] .. "\n(معدل مؤقت - يعود بعد الريستارت)")
+  else
+    GM.msg("RZ-GM", "set_env غير متاح على هذا البناء.\nجرب من الشات:\n/run set_env(\"" ..
+      r[2] .. "\",\"" .. r[3] .. "\")")
+  end
+end
+
+function gm_rate1() do_rate(1) end
+function gm_rate2() do_rate(2) end
+function gm_rate3() do_rate(3) end
+function gm_rate4() do_rate(4) end
+function gm_rate5() do_rate(5) end
+
+local function do_world_buff(i)
+  local b = GM.world_buffs[i]
+  if b == nil then return end
+  local ms = GM.duration_ms()
+  local how = GM.act_world_state(b[1], b[2], ms)
+  if how ~= nil then
+    GM.msg("RZ-GM", "تم (جماعي عبر " .. how .. "):\n" .. b[3] ..
+      " +" .. tostring(b[2]) .. "\nالمدة: " .. GM.duration_label())
+  else
+    GM.msg("RZ-GM", b[3] .. ": دوال العالم غير موجودة هنا.\n" ..
+      "بديل - كونسول لكل لاعب:\n#add_state(" .. tostring(b[1]) .. "," ..
+      tostring(b[2]) .. "," .. tostring(ms) .. ",\"NAME\")")
+  end
+end
+
+function gm_wbuf1() do_world_buff(1) end
+function gm_wbuf2() do_world_buff(2) end
+function gm_wbuf3() do_world_buff(3) end
+function gm_wbuf4() do_world_buff(4) end
+function gm_wbuf5() do_world_buff(5) end
+function gm_wbuf6() do_world_buff(6) end
+
+-- ---------- GIFTS TAB ----------
+function gm_gift_menu()
   local list = {
-    { "Gold",        "gm_do_gold"  },
-    { "Level",       "gm_do_level" },
-    { "Exp / JP",    "gm_do_exp"   },
-    { "Buff",        "gm_do_buff"  },
-    { "Heal",        "gm_do_heal"  },
-    { "Item",        "gm_do_item"  },
-    { "Permanent blessing (all buffs)", "gm_buff_all" },
-    { "Back",        "gm_main"     }
+    { "فلوس",          "gm_gold_menu"  },
+    { "خبرة / نقاط",   "gm_exp_menu"   },
+    { "مستوى",         "gm_level_menu" },
+    { "ايتم",          "gm_item_menu"  },
+    { "علاج كامل",     "gm_do_heal"    },
+    { "رجوع",          "gm_main"       },
   }
-
-  show("RZ-GM", "Target: " .. t .. "\nChoose an action:", list)
+  show("RZ-GM - هدايا", "الهدف: " .. GM.cur_target() .. "\nاختر النوع:", list)
 end
 
--- ---- gold ---------------------------------------------------
-function gm_do_gold()
+-- gold
+function gm_gold_menu()
   local list = {}
   local i
   for i = 1, count(GM.amounts) do
-    list[i] = { tostring(GM.amounts[i]) .. " gold", "gm_amt" .. i }
+    list[count(list) + 1] = { tostring(GM.amounts[i]) .. " ذهب", "gm_amt" .. i }
   end
-  list[count(list) + 1] = { "Back", "gm_actions" }
-  show("RZ-GM", "How much gold?", list)
+  list[count(list) + 1] = { "رجوع", "gm_gift_menu" }
+  show("RZ-GM - فلوس", "الهدف: " .. GM.cur_target() .. "\nاختر المبلغ:", list)
 end
 
 local function do_gold(n)
-  if GM.target ~= "self" and GM.target ~= GM.me() then
-    GM.msg("RZ-GM", "Target: " .. tostring(GM.target) ..
-      "\n\nThis build can only grant to the player who opened the board.\n" ..
-      "Use the Windows tool (GM-Tool.ps1) for other players.")
+  local t = GM.cur_target()
+  if t ~= "self" and t ~= GM.me() then
+    GM.msg("RZ-GM", "الفلوس تعمل على نفسك فقط في اللعب.\n" ..
+      "للاعب آخر استخدم اداة الويندوز GM-Tool.")
     return
   end
   local ok = GM.act_gold(n)
-  GM.gift(tostring(n) .. " gold", ok, GM.me())
+  GM.gift(tostring(n) .. " ذهب", ok, GM.me())
 end
 
 function gm_amt1() do_gold(GM.amounts[1]) end
 function gm_amt2() do_gold(GM.amounts[2]) end
 function gm_amt3() do_gold(GM.amounts[3]) end
 function gm_amt4() do_gold(GM.amounts[4]) end
+function gm_amt5() do_gold(GM.amounts[5]) end
+function gm_amt6() do_gold(GM.amounts[6]) end
 
--- ---- level --------------------------------------------------
-function gm_do_level()
+-- level
+function gm_level_menu()
   local list = {}
-  local i
+  local i, op, lbl
   for i = 1, count(GM.level_ops) do
-    local op = GM.level_ops[i]
-    local lbl = ""
-    if op[1] == "set" then lbl = "set to " .. tostring(op[2])
-    else lbl = "+" .. tostring(op[2]) .. " level" end
-    list[i] = { lbl, "gm_lvl" .. i }
+    op = GM.level_ops[i]
+    if op[1] == "set" then lbl = "تعيين المستوى " .. tostring(op[2])
+    else lbl = " +" .. tostring(op[2]) .. " مستوى" end
+    list[count(list) + 1] = { lbl, "gm_lvl" .. i }
   end
-  list[count(list) + 1] = { "Back", "gm_actions" }
-  show("RZ-GM", "Level change:", list)
+  list[count(list) + 1] = { "رجوع", "gm_gift_menu" }
+  show("RZ-GM - مستوى", "الهدف: " .. GM.cur_target() .. "\nاختر:", list)
 end
 
 local function do_level(i)
   local op = GM.level_ops[i]
   if op == nil then return end
-  if GM.target ~= "self" and GM.target ~= GM.me() then
-    GM.msg("RZ-GM", "This build can only change the level of the player who opened the board.")
+  local t = GM.cur_target()
+  if t ~= "self" and t ~= GM.me() then
+    GM.msg("RZ-GM", "المستوى يعمل على نفسك فقط في اللعب.\nللاعب آخر: GM-Tool.")
     return
   end
   if op[1] ~= "set" and GM.my_level() == nil then
-    GM.msg("RZ-GM", "Cannot read your current level on this build,\n" ..
-      "so '+' operations are blocked to protect your character.\n\n" ..
-      "Use a [set to N] option instead.")
+    GM.msg("RZ-GM", "لا يمكن قراءة مستواك الحالي - استخدم خيار التعيين.")
     return
   end
   local ok = GM.act_level(op[1], op[2])
-  GM.gift("level " .. tostring(op[1]) .. " " .. tostring(op[2]), ok, GM.me())
+  GM.gift("مستوى " .. tostring(op[1]) .. " " .. tostring(op[2]), ok, GM.me())
 end
 
 function gm_lvl1() do_level(1) end
 function gm_lvl2() do_level(2) end
 function gm_lvl3() do_level(3) end
 function gm_lvl4() do_level(4) end
+function gm_lvl5() do_level(5) end
 
--- ---- exp / jp -----------------------------------------------
-function gm_do_exp()
+-- exp / jp
+function gm_exp_menu()
   local list = {}
-  local i
+  local i, op
   for i = 1, count(GM.exp_ops) do
-    local op = GM.exp_ops[i]
-    list[i] = { "exp " .. tostring(op[1]) .. " / jp " .. tostring(op[2]), "gm_exp" .. i }
+    op = GM.exp_ops[i]
+    list[count(list) + 1] = { "خبرة " .. tostring(op[1]) .. " / نقطة " .. tostring(op[2]), "gm_exp" .. i }
   end
-  list[count(list) + 1] = { "Back", "gm_actions" }
-  show("RZ-GM", "Exp / JP:", list)
+  list[count(list) + 1] = { "رجوع", "gm_gift_menu" }
+  show("RZ-GM - خبرة", "الهدف: " .. GM.cur_target() .. "\nاختر:", list)
 end
 
 local function do_exp(i)
   local op = GM.exp_ops[i]
   if op == nil then return end
+  local t = GM.cur_target()
+  if t ~= "self" and t ~= GM.me() then
+    GM.msg("RZ-GM", "الخبرة تعمل على نفسك فقط في اللعب.\nللاعب آخر: GM-Tool.")
+    return
+  end
   local ok = GM.act_exp(op[1], op[2])
-  GM.gift("exp " .. tostring(op[1]) .. " jp " .. tostring(op[2]), ok, GM.me())
+  GM.gift("خبرة " .. tostring(op[1]) .. " / نقطة " .. tostring(op[2]), ok, GM.me())
 end
 
 function gm_exp1() do_exp(1) end
 function gm_exp2() do_exp(2) end
 function gm_exp3() do_exp(3) end
 function gm_exp4() do_exp(4) end
+function gm_exp5() do_exp(5) end
 
--- ---- buff ---------------------------------------------------
-function gm_do_buff()
-  if count(GM.buffs) == 0 then
-    GM.msg("RZ-GM", "No buffs configured.\n\nEdit GM.buffs inside NPC_GM_Board.lua and recompress.")
-    return
-  end
-  local list = {}
-  local i
-  for i = 1, count(GM.buffs) do
-    local b = GM.buffs[i]
-    list[i] = { "state " .. tostring(b[1]) .. " lv" .. tostring(b[2]), "gm_buff" .. i }
-  end
-  list[count(list) + 1] = { "Back", "gm_actions" }
-  show("RZ-GM", "Buffs:", list)
-end
-
-local function do_buff(i)
-  local b = GM.buffs[i]
-  if b == nil then return end
-  local ok
-  local t = GM.target
-  if t == nil or t == "self" or t == "all" or t == GM.me() then
-    ok = GM.act_buff(b[1], b[2], b[3])
-  else
-    ok = GM.act_buff_to(t, b[1], b[2], b[3] * 60000)
-  end
-  GM.gift("buff " .. tostring(b[1]) .. " -> " .. tostring(t or "self"), ok, t)
-end
-
--- v1.5: apply every configured buff with the longest duration
-function gm_buff_all()
-  local t = GM.target
-  local n = 0
-  local i
-  for i = 1, count(GM.buffs) do
-    local b = GM.buffs[i]
-    local ok
-    if t == nil or t == "self" or t == "all" or t == GM.me() then
-      ok = GM.act_buff(b[1], b[2], GM.permanent_ms / 60000)
-    else
-      ok = GM.act_buff_to(t, b[1], b[2], GM.permanent_ms)
-    end
-    if ok then n = n + 1 end
-  end
-  GM.msg("RZ-GM", "Permanent blessing: " .. tostring(n) .. "/" ..
-    tostring(count(GM.buffs)) .. " states applied to " .. tostring(t or "self"))
-end
-
-function gm_buff1() do_buff(1) end
-function gm_buff2() do_buff(2) end
-function gm_buff3() do_buff(3) end
-function gm_buff4() do_buff(4) end
-
--- ---- heal ---------------------------------------------------
-function gm_do_heal()
-  local ok = GM.act_heal()
-  GM.gift("full heal", ok, GM.me())
-end
-
--- ---- item ---------------------------------------------------
-function gm_do_item()
+-- item
+function gm_item_menu()
   if count(GM.items) == 0 then
-    GM.msg("RZ-GM", "No items configured.\n\nEdit GM.items inside NPC_GM_Board.lua and recompress.")
+    GM.msg("RZ-GM", "لا توجد ايتمات معرفة.\n" ..
+      "لإرسال ايتم للاعب بالاسم استخدم GM-Tool او:\n" ..
+      "/run insert_item(CODE,COUNT)")
     return
   end
   local list = {}
-  local i
+  local i, it, lbl
   for i = 1, count(GM.items) do
-    local it = GM.items[i]
-    local lbl = it[3]
-    if lbl == nil then lbl = "item " .. tostring(it[1]) end
-    list[i] = { lbl .. " x" .. tostring(it[2]), "gm_item" .. i }
+    it = GM.items[i]
+    lbl = it[3]
+    if lbl == nil then lbl = "ايتم " .. tostring(it[1]) end
+    list[count(list) + 1] = { lbl .. " x" .. tostring(it[2]), "gm_item" .. i }
   end
-  list[count(list) + 1] = { "Back", "gm_actions" }
-  show("RZ-GM", "Items:", list)
+  list[count(list) + 1] = { "رجوع", "gm_gift_menu" }
+  show("RZ-GM - ايتمات", "الهدف: " .. GM.cur_target(), list)
 end
 
 local function do_item(i)
   local it = GM.items[i]
   if it == nil then return end
   local ok = GM.act_item(it[1], it[2])
-  GM.gift((it[3] or ("item " .. tostring(it[1]))) .. " x" .. tostring(it[2]), ok, GM.me())
+  GM.gift((it[3] or ("ايتم " .. tostring(it[1]))) .. " x" .. tostring(it[2]), ok, GM.me())
 end
 
 function gm_item1() do_item(1) end
 function gm_item2() do_item(2) end
 function gm_item3() do_item(3) end
 function gm_item4() do_item(4) end
+function gm_item5() do_item(5) end
+function gm_item6() do_item(6) end
 
--- ---- announce -----------------------------------------------
-function gm_announce_menu()
-  if count(GM.players) == 0 then
-    GM.msg("RZ-GM", "No names in GM.players.\n\nAdd names inside NPC_GM_Board.lua.")
+function gm_do_heal()
+  local t = GM.cur_target()
+  if t ~= "self" and t ~= GM.me() then
+    GM.msg("RZ-GM", "العلاج يعمل على نفسك فقط في اللعب.")
     return
   end
-  local list = {}
-  local i
-  for i = 1, count(GM.players) do
-    if i <= 8 then
-      list[count(list) + 1] = { "Announce gift to " .. GM.players[i], "gm_ann" .. i }
-    end
-  end
-  list[count(list) + 1] = { "Plain test notice", "gm_ann_test" }
-  list[count(list) + 1] = { "Back", "gm_main" }
-  show("RZ-GM", "Announcements:", list)
-end
-
-local function ann(i)
-  local name = GM.players[i]
-  if name == nil then return end
-  local ok = GM.act_notice("[GM] " .. name .. " has received a gift. Congratulations!")
-  if ok then GM.msg("RZ-GM", "Notice sent.")
-  else GM.msg("RZ-GM", "Notice NOT supported on this build. See [Report].") end
-end
-
-function gm_ann1() ann(1) end
-function gm_ann2() ann(2) end
-function gm_ann3() ann(3) end
-function gm_ann4() ann(4) end
-function gm_ann5() ann(5) end
-function gm_ann6() ann(6) end
-function gm_ann7() ann(7) end
-function gm_ann8() ann(8) end
-
-function gm_ann_test()
-  local ok = GM.act_notice("[GM] RZ-GM board test notice.")
-  if ok then GM.msg("RZ-GM", "Test notice sent.")
-  else GM.msg("RZ-GM", "Notice NOT supported on this build. See [Report].") end
+  local ok = GM.act_heal()
+  GM.gift("علاج كامل", ok, GM.me())
 end
 
 -- ============================================================
 --  8) HOOK INTO AN EXISTING NPC
 -- ============================================================
 
--- Replaces <npc_contact_fn> with a wrapper:
---   * GM character  -> RZ-GM board
---   * anyone else   -> the original npc dialog, untouched
 function GM.install_hook(fn_name)
   local G = nil
   if type(_G) == "table" then G = _G end
@@ -838,23 +896,18 @@ function GM.install_hook(fn_name)
     log("hook failed: no global environment")
     return false
   end
-
   local orig = G[fn_name]
   if type(orig) ~= "function" then
     log("hook failed: " .. tostring(fn_name) .. " not found")
     return false
   end
-
   G[fn_name] = function()
     local nm = "?"
     pcall(function() nm = GM.me() end)
     if nm == "" then nm = "?" end
     log("contact fired | who=" .. tostring(nm))
-
     local ok = false
-    pcall(function()
-      ok = GM.gate_ok()
-    end)
+    pcall(function() ok = GM.gate_ok() end)
     if ok then
       log("gate PASS -> opening board")
       pcall(gm_open)
@@ -863,7 +916,6 @@ function GM.install_hook(fn_name)
       pcall(orig)
     end
   end
-
   GM.hooked = fn_name
   log("hook installed on " .. fn_name)
   return true
