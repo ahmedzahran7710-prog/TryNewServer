@@ -1,48 +1,56 @@
 @echo off
 REM ============================================================
 REM  START-GM-TOOL.cmd  --  launcher for GM-Tool v2.0 GUI
-REM  Checks files, ensures SQL Server runs, opens the GUI.
+REM  Parses GM-Tool.ps1 first (shows exact error line), then GUI.
 REM  ASCII only / CRLF
 REM ============================================================
 setlocal
 cd /d "%~dp0"
-title RZ-GM Tool Launcher
+title RZ-GM Tool v2.0 Launcher
 
 echo.
 echo ==============================================
 echo   RZ-GM Tool v2.0 launcher
 echo ==============================================
 
+REM ---- 0) launcher marker (works even if PS never runs) --------
+>> GM-Tool-last.log echo [%date% %time%] launcher started, cd=%CD%
+
 REM ---- 1) PowerShell present? --------------------------------
 where powershell >nul 2>&1
 if errorlevel 1 (
   echo FAIL: PowerShell not found on this PC.
-  echo This tool needs Windows PowerShell 5.1 (built into Windows).
   pause
   exit /b 1
 )
 
 REM ---- 2) GM-Tool.ps1 present? -------------------------------
-if not exist "%~dp0GM-Tool.ps1" (
+if not exist "GM-Tool.ps1" (
   echo FAIL: GM-Tool.ps1 not found in:
-  echo   %~dp0
+  echo   %CD%
+  echo Download GM-Tool.ps1 into this folder and run again.
+  pause
+  exit /b 1
+)
+echo [OK] GM-Tool.ps1 found
+
+if not exist "GM-UI-ar.txt" echo WARN: GM-UI-ar.txt missing - UI will be English.
+if not exist "GM-Buffs-ar.csv" echo WARN: GM-Buffs-ar.csv missing - buff list empty.
+
+REM ---- 3) PARSE CHECK (exact line numbers on failure) ---------
+echo Checking GM-Tool.ps1 syntax ...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$e=$null; $t=$null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\GM-Tool.ps1'), [ref]$t, [ref]$e); if($e.Count -gt 0){ $msg = ($e | ForEach-Object { 'PARSE ERROR line ' + $_.Extent.StartLineNumber + ': ' + $_.Message }) -join [Environment]::NewLine; Add-Content -LiteralPath '.\GM-Tool-last.log' -Value $msg; Write-Host $msg -ForegroundColor Red; exit 1 } else { Add-Content -LiteralPath '.\GM-Tool-last.log' -Value 'PARSE OK'; Write-Host '[OK] syntax parse OK' -ForegroundColor Green; exit 0 }"
+if errorlevel 1 (
   echo.
-  echo Download it from GitHub (raw) into this folder, then run
-  echo this launcher again.
+  echo ==============================================
+  echo   SYNTAX ERRORS FOUND - see message above
+  echo   and GM-Tool-last.log
+  echo ==============================================
   pause
   exit /b 1
 )
 
-REM ---- 2b) Arabic data files present? --------------------
-if not exist "%~dp0GM-UI-ar.txt" (
-  echo WARN: GM-UI-ar.txt missing - UI labels fall back to English.
-)
-if not exist "%~dp0GM-Buffs-ar.csv" (
-  echo WARN: GM-Buffs-ar.csv missing - buff list will be empty.
-)
-echo [OK] GM-Tool.ps1 found
-
-REM ---- 3) SQL Server service running? ------------------------
+REM ---- 4) SQL Server service ---------------------------------
 echo Checking SQL Server service ...
 set "SQL_SVC="
 sc query MSSQLSERVER >nul 2>&1
@@ -67,25 +75,19 @@ if defined SQL_SVC (
     goto :LAUNCH
   )
   echo WARN: could not start %SQL_SVC% automatically.
-  echo       Open services.msc and start "SQL Server (...)" manually.
   goto :LAUNCH
 )
 
 echo WARN: no SQL Server service detected by name.
-echo       If SQL is installed under another name, start it first.
-echo       (services.msc)
 
 :LAUNCH
-REM ---- 4) open the GUI (STA, console visible so errors are not hidden) --
+REM ---- 5) open the GUI --------------------------------------
+REM   Use -Command + call operator with RELATIVE path so the
+REM   Arabic folder name never goes through cmd argument parsing.
+REM   Any startup exception is caught, logged, and shown.
 echo Opening GM-Tool GUI ...
-start "" powershell -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0GM-Tool.ps1"
-if errorlevel 1 (
-  echo FAIL: could not start the GUI. See error above.
-  pause
-  exit /b 1
-)
-echo [OK] GM-Tool GUI is opening (auto-connects to 127.0.0.1).
-echo If a red error box appears, send a photo of it.
-echo Log file: GM-Tool-last.log (next to this script).
+>> GM-Tool-last.log echo [%date% %time%] launching GUI...
+start "" powershell -NoProfile -STA -ExecutionPolicy Bypass -Command "try { & '.\GM-Tool.ps1' } catch { $m = 'LAUNCH ERROR: ' + ($_ | Out-String); try { Add-Content -LiteralPath '.\GM-Tool-last.log' -Value $m } catch {}; try { [System.Windows.Forms.MessageBox]::Show($m, 'RZ-GM Tool failed') } catch { Write-Host $m }; Read-Host 'Press Enter to close' }"
+echo [OK] launcher done. If no window opened, check GM-Tool-last.log
 echo.
 exit /b 0
