@@ -642,6 +642,17 @@ set_env("game.gold_drop_rate","200")
 - **Validation:** ASCII 51107 B, `()`/`{}`/`[]` balance 0, try/catch 28/28, no `Get-Variable` leftovers.
 - **If it still fails:** photo of red MessageBox **or** contents of `GM-Tool-last.log` identifies exact line.
 
+## 2026-11-15 — GM-Tool v2.0.2: silent-close diagnosis (PR #12)
+- **Owner report:** same instant close, and **NO GM-Tool-last.log at all** in the folder (image-19) => PS script never reached its first executable line: either **parse error** or **never launched** (Arabic path `مشروع اوامر الجي ام` through `powershell -File "%~dp0..."` can be mangled by cmd/start OEM codepage).
+- **Exonerated:** `New-Object Type(args)` syntax (same style in working v1.7, `015f6da`); full-file string/comment/subexpression state machines all balanced; no PS7-only syntax; param first; ASCII/BOM clean. Diff v1.7→v2.0 constructs (switch, U(), ContainsKey, UTF8, PSScriptRoot, TabPages...) all valid PS5.1.
+- **START-GM-TOOL.cmd v2.0.2 diagnosis chain (each step appends GM-Tool-last.log):**
+  1. cmd itself writes `launcher started` marker BEFORE calling PS
+  2. **ParseFile check** (official .NET `Language.Parser::ParseFile`) runs first — prints `PARSE ERROR line N` red to console + log, `pause` on failure
+  3. GUI launch changed from `-File "%~dp0GM-Tool.ps1"` to `-Command "try { & '.\GM-Tool.ps1' } catch { log + MessageBox + Read-Host }"` — **relative path**, Arabic folder never crosses cmd arg parsing
+- **GM-Tool.ps1 v2.0.2:** boot marker = absolute-first executable (before Add-Type); Add-Type + EnableVisualStyles moved INSIDE master try (assembly failures now caught).
+- **Reading GM-Tool-last.log going forward:** only 'launcher started' → PS never ran; 'PARSE ERROR line N' → exact bug line; 'PARSE OK' but no GUI → runtime error shown in log/MessageBox; no file → cmd itself didn't run.
+- **Pending owner test:** run new START-GM-TOOL.cmd; if PARSE ERROR line N appears, that line is the fix target. Analysis strongly suggests parse error OR path mangling — chain will disambiguate.
+
 ## 12) قالب تحديث المحادثة القادمة
 
 انسخ هذا القالب وأضفه في سجل المحادثات، ثم عدّل الأقسام المتأثرة:
