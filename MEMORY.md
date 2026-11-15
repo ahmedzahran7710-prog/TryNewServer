@@ -628,6 +628,20 @@ set_env("game.gold_drop_rate","200")
 - **Validation:** ASCII OK, `()`/`{}`/`[]` balance 0 after string-strip, 44 functions all defined-and-called, zero refs to removed controls, `sa password` count 0, no Arabic codepoints in .ps1.
 - **Files for user to re-download:** `GM-Tool.ps1`, `GM-UI-ar.txt`, `GM-Buffs-ar.csv`, `START-GM-TOOL.cmd` (all four must sit in the same folder).
 
+## 2026-11-14 (v2.0 crash fix) — GM-Tool v2.0 was closing instantly
+- **Symptom (owner):** "لما باجي افتحها بتقفل في ساعتها من غير ما تجيبلي اي حاجه" — GUI died before ShowDialog; launcher used `-WindowStyle Hidden` so the error was invisible.
+- **Fix applied to GM-Tool.ps1 (v2.0.1 hardening):**
+  1. **Master try/catch** wraps everything after `EnableVisualStyles` — any startup error now shows a **MessageBox** + writes `GM-Tool-last.log` (next to the script) instead of dying silently.
+  2. **Log() is now safe**: guards null `$txtLog`, and **always mirrors every line to `GM-Tool-last.log`** (UTF-8 append) so post-mortem works even when UI never opened.
+  3. **Root path hardened**: `$PSScriptRoot` → `Get-Location` → `Temp` fallback; never empty for `Join-Path`.
+  4. **Load-UiStrings / Load-BuffCatalog** fully wrapped in nested try/catch; buff CSV parse uses `[int]::TryParse` (skips bad lines, never throws).
+  5. **Grid SelectionChanged** wrapped in try/catch (was able to kill the process if fired during DataSource bind).
+  6. **cmbTarget fill** uses `$null -ne $script:cmbTarget` instead of broken `Get-Variable cmbTarget` (wrong scope — never found the combo).
+  7. Early boot marker `=== GM-Tool v2.0 starting ===` written to log first thing — if log has the marker but no more lines, error is between marker and first UI; if **no log at all**, it's a **parse error** or the file never ran.
+- **START-GM-TOOL.cmd:** dropped `-WindowStyle Hidden` (console stays visible so PowerShell errors are readable); echoes path to `GM-Tool-last.log`.
+- **Validation:** ASCII 51107 B, `()`/`{}`/`[]` balance 0, try/catch 28/28, no `Get-Variable` leftovers.
+- **If it still fails:** photo of red MessageBox **or** contents of `GM-Tool-last.log` identifies exact line.
+
 ## 12) قالب تحديث المحادثة القادمة
 
 انسخ هذا القالب وأضفه في سجل المحادثات، ثم عدّل الأقسام المتأثرة:

@@ -76,14 +76,16 @@ echo       If SQL is installed under another name, start it first.
 echo       (services.msc)
 
 :LAUNCH
-REM ---- 4) open the GUI (STA + hidden console = clean window) --
+REM ---- 4) open the GUI (STA, console visible so errors are not hidden) --
 echo Opening GM-Tool GUI ...
-start "" powershell -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0GM-Tool.ps1"
+start "" powershell -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0GM-Tool.ps1"
 if errorlevel 1 (
   echo FAIL: could not start the GUI. See error above.
   pause
   exit /b 1
 )
 echo [OK] GM-Tool GUI is opening (auto-connects to 127.0.0.1).
+echo If a red error box appears, send a photo of it.
+echo Log file: GM-Tool-last.log (next to this script).
 echo.
 exit /b 0
