@@ -6,7 +6,7 @@ tab.tools=أدوات
 lbl.target=اللاعب المستهدف
 lbl.duration=المدة
 lbl.buffs_list=اختر الباف (الاسم · القوة · الكود)
-btn.send_buff=إرسال للمحدد
+btn.send_buff=إرسال دائم SQL (يحتاج إعادة دخول)
 btn.clear_buffs=مسح بافات المحدد
 btn.bless=باركة كاملة (12 باف)
 btn.rates=معدلات السيرفر (انسخ والصق في الشات)
@@ -36,3 +36,6 @@ btn.send_all=إرسال للكل (فعالية)
 lbl.gift=كود الهدية
 lbl.count=العدد
 btn.run_select=تشغيل SELECT
+btn.instant_buff=تطبيق فوري — انسخ أمر الشات
+lbl.hint_instant=الفوري: يُنسخ أمر الشات والصقه في اللعبة = يظهر فورًا. SQL: يظهر بعد إعادة دخول اللاعب. الجماعي: بعد إعادة دخول الجميع.
+btn.export_csv=تصدير الايتيمات والوحوش (CSV)

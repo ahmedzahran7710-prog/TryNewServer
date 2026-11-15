@@ -1,16 +1,16 @@
 @echo off
 REM ============================================================
-REM  START-GM-TOOL.cmd  --  launcher for GM-Tool v2.0 GUI
+REM  START-GM-TOOL.cmd  --  launcher for GM-Tool v2.1 GUI
 REM  Parses GM-Tool.ps1 first (shows exact error line), then GUI.
 REM  ASCII only / CRLF
 REM ============================================================
 setlocal
 cd /d "%~dp0"
-title RZ-GM Tool v2.0 Launcher
+title RZ-GM Tool v2.1 Launcher
 
 echo.
 echo ==============================================
-echo   RZ-GM Tool v2.0 launcher
+echo   RZ-GM Tool v2.1 launcher
 echo ==============================================
 
 REM ---- 0) launcher marker (works even if PS never runs) --------

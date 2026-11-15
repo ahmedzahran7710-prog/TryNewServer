@@ -1,5 +1,5 @@
 <#
-  RZ-GM Tool v2.0  --  Tabbed Windows GUI for Rappelz 9.1
+  RZ-GM Tool v2.1  --  Tabbed Windows GUI for Rappelz 9.1
   ASCII ONLY in this file. Arabic labels live in:
     GM-UI-ar.txt    (UTF-8)  - UI strings
     GM-Buffs-ar.csv (UTF-8)  - buff catalog (name / power / code / minutes)
@@ -14,7 +14,7 @@
 param([switch]$SelfTest)
 
 if ($SelfTest) {
-    Write-Host "GM-Tool.ps1 v2.0 self-test: file loads and parses OK."
+    Write-Host "GM-Tool.ps1 v2.1 self-test: file loads and parses OK."
     exit 0
 }
 
@@ -24,7 +24,7 @@ try {
     try { if (-not [string]::IsNullOrEmpty($PSScriptRoot)) { $__dir = $PSScriptRoot } } catch { }
     if ([string]::IsNullOrEmpty($__dir)) { try { $__dir = (Get-Location).Path } catch { $__dir = "C:\Windows\Temp" } }
     $bootLog = Join-Path $__dir "GM-Tool-last.log"
-    [System.IO.File]::AppendAllText($bootLog, "=== GM-Tool v2.0 script reached line 1 === " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + " ===`r`n", [System.Text.Encoding]::UTF8)
+    [System.IO.File]::AppendAllText($bootLog, "=== GM-Tool v2.1 script reached line 1 === " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + " ===`r`n", [System.Text.Encoding]::UTF8)
 } catch { }
 
 # ---- master guard: never die silently ----
@@ -481,6 +481,122 @@ function Do-BlockAccount {
 
 
 # ============================================================
+#  CSV EXPORT - items / monsters / strings from the game DB
+# ============================================================
+function Find-TableCatalog([string]$tbl) {
+    $cands = @("", "Arcadia", "Telecaster", "Telecaster1", "Auth", "BILLING")
+    foreach ($d in $cands) {
+        try {
+            $cmd = $script:Conn.CreateCommand()
+            if ($d -eq "") {
+                $cmd.CommandText = "SELECT CASE WHEN OBJECT_ID(N'dbo.[" + $tbl + "]') IS NOT NULL THEN 1 ELSE 0 END"
+            } else {
+                $cmd.CommandText = "SELECT CASE WHEN OBJECT_ID(N'" + $d + ".dbo.[" + $tbl + "]') IS NOT NULL THEN 1 ELSE 0 END"
+            }
+            $v = $cmd.ExecuteScalar()
+            if ($v -ne $null -and [int]$v -eq 1) { return $d }
+        } catch { }
+    }
+    return $null
+}
+
+function Write-CsvFile([string]$sql, [string]$path) {
+    $cmd = $script:Conn.CreateCommand()
+    $cmd.CommandText = $sql
+    $r = $cmd.ExecuteReader()
+    $sb = New-Object System.Text.StringBuilder
+    $hdr = @()
+    for ($i = 0; $i -lt $r.FieldCount; $i++) { $hdr += $r.GetName($i) }
+    [void]$sb.AppendLine(($hdr -join ","))
+    $n = 0
+    while ($r.Read()) {
+        $cells = @()
+        for ($i = 0; $i -lt $r.FieldCount; $i++) {
+            $s = [string]$r.GetValue($i)
+            if ($s -eq $null) { $s = "" }
+            if ($s.Contains(",") -or $s.Contains('"') -or $s.Contains("`n") -or $s.Contains("`r")) {
+                $s = '"' + $s.Replace('"', '""') + '"'
+            }
+            $cells += $s
+        }
+        [void]$sb.AppendLine(($cells -join ","))
+        $n++
+    }
+    $r.Close()
+    $enc = New-Object System.Text.UTF8Encoding($true)
+    [System.IO.File]::WriteAllText($path, $sb.ToString(), $enc)
+    return $n
+}
+
+function Do-ExportLists {
+    if ($script:Conn -eq $null) { Log "Not connected."; return }
+    Log "Exporting lists to CSV in tool folder ..."
+    # items
+    try {
+        $dbi = Find-TableCatalog "ItemResource"
+        if ($dbi -eq $null) { Log "ItemResource: table NOT found on this server." }
+        else {
+            $p = ""; if ($dbi -ne "") { $p = $dbi + ".dbo." }
+            $sql = $null
+            $dbs = Find-TableCatalog "StringResource"
+            if ($dbs -ne $null) {
+                $p2 = ""; if ($dbs -ne "") { $p2 = $dbs + ".dbo." }
+                $sql = "SELECT ir.id AS item_id, sr.value AS item_name, ir.type AS item_type, ir.price, ir.use_min_level FROM " + $p + "ItemResource ir LEFT JOIN " + $p2 + "StringResource sr ON sr.code = ir.name_id ORDER BY ir.id"
+            }
+            if ($sql -eq $null) { $sql = "SELECT * FROM " + $p + "ItemResource ORDER BY id" }
+            $path = Join-Path $script:Root "export-items.csv"
+            $n = Write-CsvFile $sql $path
+            Log ("WROTE export-items.csv: " + $n + " rows (" + $p + ")")
+        }
+    } catch { Log ("items export FAILED: " + $_.Exception.Message) }
+    # monsters
+    try {
+        $dbm = Find-TableCatalog "MonsterResource"
+        if ($dbm -eq $null) { Log "MonsterResource: table NOT found on this server." }
+        else {
+            $p = ""; if ($dbm -ne "") { $p = $dbm + ".dbo." }
+            $sql = $null
+            try {
+                $c2 = $script:Conn.CreateCommand()
+                $c2.CommandText = "SELECT CASE WHEN COL_LENGTH(N'" + $p + "MonsterResource', N'name_id') IS NULL THEN 0 ELSE 1 END"
+                $v2 = $c2.ExecuteScalar()
+                if ($v2 -ne $null -and [int]$v2 -eq 1) {
+                    $dbs = Find-TableCatalog "StringResource"
+                    if ($dbs -ne $null) {
+                        $p2 = ""; if ($dbs -ne "") { $p2 = $dbs + ".dbo." }
+                        $sql = "SELECT m.id AS monster_id, sr.value AS monster_name, m.level, m.hp, m.attack_point, m.defence, m.exp FROM " + $p + "MonsterResource m LEFT JOIN " + $p2 + "StringResource sr ON sr.code = m.name_id ORDER BY m.level, m.id"
+                    }
+                }
+            } catch { }
+            if ($sql -eq $null) { $sql = "SELECT * FROM " + $p + "MonsterResource ORDER BY id" }
+            $path = Join-Path $script:Root "export-monsters.csv"
+            $n = Write-CsvFile $sql $path
+            Log ("WROTE export-monsters.csv: " + $n + " rows (" + $p + ")")
+        }
+    } catch {
+        try {
+            $p = ""; if ($dbm -ne "") { $p = $dbm + ".dbo." }
+            $path = Join-Path $script:Root "export-monsters.csv"
+            $n = Write-CsvFile ("SELECT * FROM " + $p + "MonsterResource ORDER BY id") $path
+            Log ("WROTE export-monsters.csv: " + $n + " rows (" + $p + ")")
+        } catch { Log ("monsters export FAILED: " + $_.Exception.Message) }
+    }
+    # strings (names dictionary)
+    try {
+        $dbs = Find-TableCatalog "StringResource"
+        if ($dbs -eq $null) { Log "StringResource: table NOT found on this server." }
+        else {
+            $p = ""; if ($dbs -ne "") { $p = $dbs + ".dbo." }
+            $path = Join-Path $script:Root "export-strings.csv"
+            $n = Write-CsvFile ("SELECT * FROM " + $p + "StringResource ORDER BY code") $path
+            Log ("WROTE export-strings.csv: " + $n + " rows (" + $p + ")")
+        }
+    } catch { Log ("strings export FAILED: " + $_.Exception.Message) }
+    Log "Done. Open the CSV files in Excel (UTF-8, Arabic OK)."
+}
+
+
+# ============================================================
 #  DATA FILES (UTF-8) - Arabic labels live here, not in this file
 # ============================================================
 $script:Root = $null
@@ -552,7 +668,7 @@ try { Load-BuffCatalog } catch { }
 #  FORM + CONNECTION ROW
 # ============================================================
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "RZ-GM Tool v2.0  -  Rappelz 9.1"
+$form.Text = "RZ-GM Tool v2.1  -  Rappelz 9.1"
 $form.Size = New-Object System.Drawing.Size(1000, 780)
 $form.StartPosition = 'CenterScreen'
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
@@ -875,19 +991,31 @@ function Do-SendBuffTab {
     Log ("buff [" + $b.Code + "] " + $b.Name + " +" + $b.Power + " / " + $min + " min -> " + $script:SelectedName + " ...")
     $ok = Exec $sql @{ '@cid' = $sid; '@code' = $b.Code; '@lvl' = $b.Power; '@dur' = $dur }
     if ($ok) {
-        Log "DONE. Target must relog to see the buff."
+        Log "DONE (SQL). Target must relog to see the buff - or use Instant button for online players."
         Show-StateList
     }
 }
 
-New-BButton (U "btn.send_buff" "Send to selected") 92 { Do-SendBuffTab }
-New-BButton (U "btn.clear_buffs" "Clear selected buffs") 132 { Do-ClearBuffs }
-New-BButton (U "btn.bless" "Bless ALL (12 buffs)") 172 { Do-BlessAll }
+function Do-SendBuffInstant {
+    if ($lvBuffs.SelectedItems.Count -lt 1) { Log "Pick a buff from the list first."; return }
+    if ([string]::IsNullOrEmpty($script:SelectedName)) { Log "Select a target player first."; return }
+    $b = $lvBuffs.SelectedItems[0].Tag
+    $min = Get-DurMinutes
+    $dur = [int]($min * 60000)
+    $cmd = "/run add_state(" + $b.Code + "," + $b.Power + "," + $dur + ",\"" + $script:SelectedName + "\")"
+    Log ("instant buff [" + $b.Code + "] " + $b.Name + " +" + $b.Power + " / " + $min + " min -> " + $script:SelectedName)
+    Copy-Chat $cmd
+}
+
+New-BButton (U "btn.instant_buff" "Instant - copy chat command") 92 { Do-SendBuffInstant }
+New-BButton (U "btn.send_buff" "Send to selected (SQL)") 132 { Do-SendBuffTab }
+New-BButton (U "btn.clear_buffs" "Clear selected buffs") 172 { Do-ClearBuffs }
+New-BButton (U "btn.bless" "Bless ALL (12 buffs)") 212 { Do-BlessAll }
 
 $lblHint = New-Object System.Windows.Forms.Label
-$lblHint.Text = "Note: chat commands also work in game:`r`n/run add_state(CODE,POWER,MS,`"NAME`")"
-$lblHint.Location = New-Object System.Drawing.Point($bx, 220)
-$lblHint.Size = New-Object System.Drawing.Size(280, 60)
+$lblHint.Text = U "lbl.hint_instant" "Instant: copy the chat command and paste it in game (no relog needed). SQL send applies at target next login."
+$lblHint.Location = New-Object System.Drawing.Point($bx, 252)
+$lblHint.Size = New-Object System.Drawing.Size(280, 96)
 $tabBuffs.Controls.Add($lblHint)
 
 # ------------------------------------------------------------
@@ -1077,6 +1205,7 @@ New-TButton "Find buff names" 10 126 220 { Do-FindStates }
 New-TButton "Show points" 240 126 180 { Show-Points }
 New-TButton "Block / unblock account" 430 126 220 { Do-BlockAccount }
 New-TButton "Set gold for ALL chars" 660 126 260 { Do-SetGoldAll }
+New-TButton (U "btn.export_csv" "Export items + monsters (CSV)") 10 198 300 { Do-ExportLists }
 
 $chkBlock = New-Object System.Windows.Forms.CheckBox
 $chkBlock.Text = "block = ON (uncheck to unblock)"
@@ -1116,7 +1245,7 @@ $uiPath = Join-Path $script:Root "GM-UI-ar.txt"
 $bfPath = Join-Path $script:Root "GM-Buffs-ar.csv"
 if (-not (Test-Path $uiPath)) { Log ("WARNING: missing " + $uiPath + " - UI falls back to English.") }
 if (-not (Test-Path $bfPath)) { Log ("WARNING: missing " + $bfPath + " - buff list will be empty.") }
-Log ("RZ-GM Tool v2.0 ready - buff catalog: " + $script:BuffCat.Count + " entries (Arabic).")
+Log ("RZ-GM Tool v2.1 ready - buff catalog: " + $script:BuffCat.Count + " entries (Arabic).")
 Log "Tabs: Player | Buffs | Server-wide | Tools"
 Log "1) Connect  2) Search  3) Tick backup  4) Pick a tab"
 
