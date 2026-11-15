@@ -22,6 +22,14 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# ---- master guard: never die silently ----
+try {
+    try {
+        $bootLog = Join-Path $PSScriptRoot "GM-Tool-last.log"
+        if ([string]::IsNullOrEmpty($PSScriptRoot)) { $bootLog = Join-Path (Get-Location).Path "GM-Tool-last.log" }
+        [System.IO.File]::AppendAllText($bootLog, "=== GM-Tool v2.0 starting " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + " ===`r`n", [System.Text.Encoding]::UTF8)
+    } catch { }
+
 # ---------------------------------------------------------------- global state
 $script:Conn = $null
 $script:SelectedSid = $null
@@ -41,10 +49,19 @@ if ($SelfTest) {
 
 function Log([string]$msg) {
     $ts = (Get-Date).ToString('HH:mm:ss')
-    $txtLog.AppendText("[$ts] $msg`r`n")
-    $txtLog.SelectionStart = $txtLog.Text.Length
-    $txtLog.ScrollToCaret()
-    [System.Windows.Forms.Application]::DoEvents()
+    $line = "[$ts] $msg"
+    try {
+        if ($null -ne $txtLog) {
+            $txtLog.AppendText($line + "`r`n")
+            $txtLog.SelectionStart = $txtLog.Text.Length
+            $txtLog.ScrollToCaret()
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    } catch { }
+    try {
+        $logPath = Join-Path $script:Root "GM-Tool-last.log"
+        [System.IO.File]::AppendAllText($logPath, $line + "`r`n", [System.Text.Encoding]::UTF8)
+    } catch { }
 }
 
 function Connect-Db {
@@ -105,13 +122,15 @@ function Load-Characters {
         }
         Log "Loaded $($dt.Rows.Count) character(s)."
         # fill buff-tab target dropdown
-        if (Get-Variable cmbTarget -ErrorAction SilentlyContinue) {
-            $script:cmbTarget.Items.Clear()
-            foreach ($r in $dt.Rows) {
-                [void]$script:cmbTarget.Items.Add([string]$r["name"] + " (sid " + [string]$r["sid"] + ")")
+        try {
+            if ($null -ne $script:cmbTarget) {
+                $script:cmbTarget.Items.Clear()
+                foreach ($r in $dt.Rows) {
+                    [void]$script:cmbTarget.Items.Add([string]$r["name"] + " (sid " + [string]$r["sid"] + ")")
+                }
+                if ($script:cmbTarget.Items.Count -gt 0) { $script:cmbTarget.SelectedIndex = 0 }
             }
-            if ($script:cmbTarget.Items.Count -gt 0) { $script:cmbTarget.SelectedIndex = 0 }
-        }
+        } catch { }
     }
     catch { Log ("LOAD FAILED: " + $_.Exception.Message) }
 }
@@ -461,8 +480,12 @@ function Do-BlockAccount {
 # ============================================================
 #  DATA FILES (UTF-8) - Arabic labels live here, not in this file
 # ============================================================
-$script:Root = $PSScriptRoot
-if ([string]::IsNullOrEmpty($script:Root)) { $script:Root = (Get-Location).Path }
+$script:Root = $null
+try { if (-not [string]::IsNullOrEmpty($PSScriptRoot)) { $script:Root = $PSScriptRoot } } catch { }
+if ([string]::IsNullOrEmpty($script:Root)) {
+    try { $script:Root = (Get-Location).Path } catch { }
+}
+if ([string]::IsNullOrEmpty($script:Root)) { $script:Root = [System.IO.Path]::GetTempPath() }
 $script:UI = @{}
 $script:BuffCat = @()
 
@@ -472,17 +495,21 @@ function Load-Utf8Lines([string]$path) {
 }
 
 function Load-UiStrings {
-    $p = Join-Path $script:Root "GM-UI-ar.txt"
-    foreach ($line in (Load-Utf8Lines $p)) {
-        $t = $line.Trim()
-        if ($t -eq "" -or $t.StartsWith("#")) { continue }
-        $i = $t.IndexOf("=")
-        if ($i -gt 0) {
-            $k = $t.Substring(0, $i)
-            $v = $t.Substring($i + 1)
-            $script:UI[$k] = $v
+    try {
+        $p = Join-Path $script:Root "GM-UI-ar.txt"
+        foreach ($line in (Load-Utf8Lines $p)) {
+            try {
+                $t = $line.Trim()
+                if ($t -eq "" -or $t.StartsWith("#")) { continue }
+                $i = $t.IndexOf("=")
+                if ($i -gt 0) {
+                    $k = $t.Substring(0, $i)
+                    $v = $t.Substring($i + 1)
+                    $script:UI[$k] = $v
+                }
+            } catch { }
         }
-    }
+    } catch { }
 }
 function U([string]$k, [string]$fb) {
     if ($script:UI.ContainsKey($k)) { return $script:UI[$k] }
@@ -491,24 +518,32 @@ function U([string]$k, [string]$fb) {
 
 function Load-BuffCatalog {
     $script:BuffCat = @()
-    $p = Join-Path $script:Root "GM-Buffs-ar.csv"
-    foreach ($line in (Load-Utf8Lines $p)) {
-        $t = $line.Trim()
-        if ($t -eq "" -or $t.StartsWith("#")) { continue }
-        $p2 = $t.Split(",")
-        if ($p2.Count -ge 4) {
-            $script:BuffCat += ,@{
-                Code  = [int]$p2[0].Trim()
-                Power = [int]$p2[1].Trim()
-                Min   = [int]$p2[2].Trim()
-                Name  = $p2[3].Trim()
-            }
+    try {
+        $p = Join-Path $script:Root "GM-Buffs-ar.csv"
+        foreach ($line in (Load-Utf8Lines $p)) {
+            try {
+                $t = $line.Trim()
+                if ($t -eq "" -or $t.StartsWith("#")) { continue }
+                $p2 = $t.Split(",")
+                if ($p2.Count -ge 4) {
+                    $code = 0; $pow = 0; $mn = 0
+                    if (-not [int]::TryParse($p2[0].Trim(), [ref]$code)) { continue }
+                    if (-not [int]::TryParse($p2[1].Trim(), [ref]$pow)) { continue }
+                    if (-not [int]::TryParse($p2[2].Trim(), [ref]$mn)) { continue }
+                    $script:BuffCat += ,@{
+                        Code  = $code
+                        Power = $pow
+                        Min   = $mn
+                        Name  = $p2[3].Trim()
+                    }
+                }
+            } catch { }
         }
-    }
+    } catch { }
 }
 
-Load-UiStrings
-Load-BuffCatalog
+try { Load-UiStrings } catch { }
+try { Load-BuffCatalog } catch { }
 
 # ============================================================
 #  FORM + CONNECTION ROW
@@ -628,6 +663,7 @@ $grid.SelectionMode = 'FullRowSelect'
 $grid.MultiSelect = $false
 $grid.AutoSizeColumnsMode = 'None'
 $grid.Add_SelectionChanged({
+  try {
     if ($grid.CurrentRow -ne $null) {
         $script:SelectedSid = $grid.CurrentRow.Cells['sid'].Value
         $script:SelectedName = $grid.CurrentRow.Cells['name'].Value
@@ -641,6 +677,7 @@ $grid.Add_SelectionChanged({
             }
         }
     }
+  } catch { }
 })
 $tabPlayer.Controls.Add($grid)
 
@@ -1085,4 +1122,27 @@ if ($txtDb.Text -eq "")     { $txtDb.Text = "Telecaster1" }
 if ($txtUser.Text -eq "")   { $txtUser.Text = "rappelz" }
 try { Connect-Db } catch { Log "auto-connect skipped: $($_.Exception.Message)" }
 
-[void]$form.ShowDialog()
+try {
+    [void]$form.ShowDialog()
+}
+catch {
+    $err = "FATAL: " + $_.Exception.Message + "`n" + $_.ScriptStackTrace
+    try { Log $err } catch { }
+    try {
+        [System.Windows.Forms.MessageBox]::Show($err, "RZ-GM Tool failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    } catch { }
+    exit 1
+}
+}
+catch {
+    $emsg = "STARTUP ERROR: " + $_.Exception.Message + "`n`n" + $_.ScriptStackTrace
+    try {
+        $lp = Join-Path $script:Root "GM-Tool-last.log"
+        [System.IO.File]::AppendAllText($lp, $emsg + "`r`n", [System.Text.Encoding]::UTF8)
+    } catch { }
+    try {
+        [System.Windows.Forms.MessageBox]::Show($emsg, "RZ-GM Tool failed to start", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    } catch { }
+    exit 1
+}
+
