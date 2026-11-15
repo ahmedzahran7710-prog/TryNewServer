@@ -18,17 +18,20 @@ if ($SelfTest) {
     exit 0
 }
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-[System.Windows.Forms.Application]::EnableVisualStyles()
+# ---- absolute-first boot marker (before anything can fail) ----
+try {
+    $__dir = $null
+    try { if (-not [string]::IsNullOrEmpty($PSScriptRoot)) { $__dir = $PSScriptRoot } } catch { }
+    if ([string]::IsNullOrEmpty($__dir)) { try { $__dir = (Get-Location).Path } catch { $__dir = "C:\Windows\Temp" } }
+    $bootLog = Join-Path $__dir "GM-Tool-last.log"
+    [System.IO.File]::AppendAllText($bootLog, "=== GM-Tool v2.0 script reached line 1 === " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + " ===`r`n", [System.Text.Encoding]::UTF8)
+} catch { }
 
 # ---- master guard: never die silently ----
 try {
-    try {
-        $bootLog = Join-Path $PSScriptRoot "GM-Tool-last.log"
-        if ([string]::IsNullOrEmpty($PSScriptRoot)) { $bootLog = Join-Path (Get-Location).Path "GM-Tool-last.log" }
-        [System.IO.File]::AppendAllText($bootLog, "=== GM-Tool v2.0 starting " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + " ===`r`n", [System.Text.Encoding]::UTF8)
-    } catch { }
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
 
 # ---------------------------------------------------------------- global state
 $script:Conn = $null
